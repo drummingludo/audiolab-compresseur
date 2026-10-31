@@ -1,0 +1,112 @@
+name: Fabrication Mac et Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    name: Mac (VST3 + AU, Apple Silicon et Intel)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --target AudioLabCompresseur_VST3 AudioLabCompresseur_AU -j 4
+
+      - name: Signer (signature locale, sans compte Apple)
+        run: |
+          A=build/AudioLabCompresseur_artefacts/Release
+          codesign --force --deep --sign - "$A/VST3/Audio Lab Compresseur.vst3"
+          codesign --force --deep --sign - "$A/AU/Audio Lab Compresseur.component"
+          lipo -info "$A/VST3/Audio Lab Compresseur.vst3/Contents/MacOS/Audio Lab Compresseur"
+
+      - name: Valider (auval + pluginval)
+        run: |
+          A=build/AudioLabCompresseur_artefacts/Release
+          mkdir -p ~/Library/Audio/Plug-Ins/Components ~/Library/Audio/Plug-Ins/VST3
+          cp -R "$A/AU/Audio Lab Compresseur.component" ~/Library/Audio/Plug-Ins/Components/
+          cp -R "$A/VST3/Audio Lab Compresseur.vst3" ~/Library/Audio/Plug-Ins/VST3/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aufx AlCp Trsv
+          curl -sSL -o pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pv.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --skip-gui-tests --validate ~/Library/Audio/Plug-Ins/VST3/"Audio Lab Compresseur.vst3"
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --skip-gui-tests --validate ~/Library/Audio/Plug-Ins/Components/"Audio Lab Compresseur.component"
+
+      - name: Préparer le paquet Mac
+        run: |
+          A=build/AudioLabCompresseur_artefacts/Release
+          P="Audio Lab Compresseur - Mac"
+          mkdir -p "$P"
+          cp -R "$A/VST3/Audio Lab Compresseur.vst3" "$A/AU/Audio Lab Compresseur.component" "$P/"
+          cp packaging/mac/Installer.command packaging/mac/LISEZ-MOI.txt "$P/"
+          chmod +x "$P/Installer.command"
+          ditto -c -k --sequesterRsrc --keepParent "$P" AudioLabCompresseur-Mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioLabCompresseur-Mac
+          path: AudioLabCompresseur-Mac.zip
+
+  windows:
+    name: Windows (VST3)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64
+          cmake --build build --config Release --target AudioLabCompresseur_VST3
+
+      - name: Valider (pluginval)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pv.zip
+          Expand-Archive pv.zip -DestinationPath pv
+          .\pv\pluginval.exe --strictness-level 10 --validate-in-process --skip-gui-tests --validate "build\AudioLabCompresseur_artefacts\Release\VST3\Audio Lab Compresseur.vst3"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Préparer le paquet Windows
+        shell: pwsh
+        run: |
+          $P = "Audio Lab Compresseur - Windows"
+          New-Item -ItemType Directory -Force -Path $P | Out-Null
+          Copy-Item -Recurse "build\AudioLabCompresseur_artefacts\Release\VST3\Audio Lab Compresseur.vst3" $P
+          Copy-Item packaging\windows\LISEZ-MOI.txt $P
+          Compress-Archive -Path $P -DestinationPath AudioLabCompresseur-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AudioLabCompresseur-Windows
+          path: AudioLabCompresseur-Windows.zip
+
+  publier:
+    name: Publier la version
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Audio Lab Compresseur ${{ github.ref_name }}
+          files: |
+            AudioLabCompresseur-Mac.zip
+            AudioLabCompresseur-Windows.zip
+          body: |
+            Plugin compresseur d'Audio Lab (Transversal Studio).
+            - Mac : VST3 + AU, Apple Silicon et Intel (AudioLabCompresseur-Mac.zip)
+            - Windows : VST3 64 bits (AudioLabCompresseur-Windows.zip)
+            Mode d'emploi dans le fichier LISEZ-MOI de chaque archive.

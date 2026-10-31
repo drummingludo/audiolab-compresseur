@@ -1,0 +1,76 @@
+// Charte Audio Lab : couleurs (thème clair / sombre) et polices.
+#pragma once
+#include <juce_gui_basics/juce_gui_basics.h>
+#include "BinaryData.h"
+
+namespace audiolab
+{
+struct Pal
+{
+    bool dark = false;
+    juce::Colour bg, bg2, bg3, bg4, text, dim, muted, border, accent, green, red, orange, yellow, teal,
+                 cv, cv2, grid, grid2, txt, txt2;
+};
+
+inline Pal lightPal()
+{
+    using C = juce::Colour;
+    Pal p;
+    p.dark = false;
+    p.bg = C (0xFFF5F5F7); p.bg2 = C (0xFFFFFFFF); p.bg3 = C (0xFFF2F2F7); p.bg4 = C (0xFFE5E5EA);
+    p.text = C (0xFF1D1D1F); p.dim = C (0xFF515154); p.muted = C (0xFF86868B); p.border = C (0x14000000);
+    p.accent = C (0xFF007AFF); p.green = C (0xFF34C759); p.red = C (0xFFFF3B30); p.orange = C (0xFFFF9500);
+    p.yellow = C (0xFFFFCC00); p.teal = C (0xFF5AC8FA);
+    p.cv = C (0xFFFAFAFC); p.cv2 = C (0xFFF2F2F7); p.grid = C (0xFFE5E5EA); p.grid2 = C (0xFFD1D1D6);
+    p.txt = C (0xFF8E8E93); p.txt2 = C (0xFF3A3A3C);
+    return p;
+}
+
+inline Pal darkPal()
+{
+    using C = juce::Colour;
+    Pal p;
+    p.dark = true;
+    p.bg = C (0xFF000000); p.bg2 = C (0xFF1C1C1E); p.bg3 = C (0xFF2C2C2E); p.bg4 = C (0xFF3A3A3C);
+    p.text = C (0xFFF5F5F7); p.dim = C (0xFFC7C7CC); p.muted = C (0xFF8E8E93); p.border = C (0x1AFFFFFF);
+    p.accent = C (0xFF0A84FF); p.green = C (0xFF30D158); p.red = C (0xFFFF453A); p.orange = C (0xFFFF9F0A);
+    p.yellow = C (0xFFFFD60A); p.teal = C (0xFF64D2FF);
+    p.cv = C (0xFF1C1C1E); p.cv2 = C (0xFF2C2C2E); p.grid = C (0xFF3A3A3C); p.grid2 = C (0xFF48484A);
+    p.txt = C (0xFF8E8E93); p.txt2 = C (0xFFD1D1D6);
+    return p;
+}
+
+// Thème partagé par tous les éléments d'une fenêtre de plugin.
+class Theme
+{
+public:
+    Theme()
+    {
+        regular = juce::Typeface::createSystemTypefaceFor (BinaryData::InterRegular_ttf, BinaryData::InterRegular_ttfSize);
+        semi    = juce::Typeface::createSystemTypefaceFor (BinaryData::InterSemiBold_ttf, BinaryData::InterSemiBold_ttfSize);
+        bold    = juce::Typeface::createSystemTypefaceFor (BinaryData::InterBold_ttf, BinaryData::InterBold_ttfSize);
+        setDark (false);
+    }
+
+    void setDark (bool d) { p = d ? darkPal() : lightPal(); }
+    const Pal& pal() const { return p; }
+
+    // Taille en points, comme « font-size » en CSS. weight : 400, 600 ou 700.
+    juce::Font ui (float size, int weight = 400, float tracking = 0) const
+    {
+        auto tf = weight >= 700 ? bold : weight >= 600 ? semi : regular;
+        return juce::Font (juce::FontOptions (tf).withPointHeight (size)).withExtraKerningFactor (tracking);
+    }
+    juce::Font mono (float size, bool isBold = false) const
+    {
+        return juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f,
+                                              isBold ? juce::Font::bold : juce::Font::plain).withPointHeight (size));
+    }
+
+private:
+    Pal p;
+    juce::Typeface::Ptr regular, semi, bold;
+};
+
+inline juce::String fr (const char* utf8) { return juce::String::fromUTF8 (utf8); }
+} // namespace audiolab

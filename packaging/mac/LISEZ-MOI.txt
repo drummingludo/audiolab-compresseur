@@ -1,0 +1,22 @@
+AUDIO LAB COMPRESSEUR — Mac (Apple Silicon et Intel)
+Transversal Studio · Audio Lab « Chimiste du son »
+
+INSTALLATION
+1. Double-cliquez sur « Installer.command ».
+   Si macOS refuse de l'ouvrir (« développeur non identifié ») :
+   - clic droit sur Installer.command > Ouvrir > Ouvrir ;
+   - ou, sur macOS 15 et plus récent : Réglages Système > Confidentialité et sécurité,
+     tout en bas, bouton « Ouvrir quand même ».
+2. Relancez votre logiciel de musique.
+
+Le plugin apparaît sous le nom « Audio Lab Compresseur » (fabricant : Transversal Studio) :
+- Logic Pro, GarageBand : format AU (Audio Units > Transversal Studio)
+- Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig : format VST3
+
+INSTALLATION MANUELLE (sans le script)
+- Audio Lab Compresseur.vst3      → ~/Library/Audio/Plug-Ins/VST3/
+- Audio Lab Compresseur.component → ~/Library/Audio/Plug-Ins/Components/
+
+NON COMPATIBLE : Pro Tools (format AAX uniquement).
+
+Code source et licence (AGPLv3) : https://github.com/drummingludo/audiolab-compresseur
