@@ -1,4 +1,4 @@
-// Écran du compresseur : vues Transfert, Activité et Mètres (reprises d'Audio Lab).
+// Écran carré du compresseur (270 × 270) : vues Transfert, Activité et Vu-Mètres (voir docs/06_GUI_Plugin_Compresseur.md).
 #pragma once
 #include "PluginProcessor.h"
 #include "Theme.h"
@@ -24,8 +24,8 @@ private:
     void drawTransfer (juce::Graphics&, float W, float H, const M&);
     void drawActivity (juce::Graphics&, float W, float H, const M&);
     void drawMeters (juce::Graphics&, float W, float H, const M&);
-    void meterBar (juce::Graphics&, const juce::String& key, float x, float y, float w, float h, float norm,
-                   bool gr, const juce::String& label, const juce::String& value, float thrNorm = -1);
+    void hBar (juce::Graphics&, const juce::String& key, float y, float norm, bool gr,
+               const juce::String& label, const juce::String& value, float thrNorm = -1);
     void needleVU (juce::Graphics&, float x, float y, float w, float h);
     double curve (double di) const;
 

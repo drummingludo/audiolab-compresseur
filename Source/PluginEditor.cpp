@@ -27,7 +27,7 @@ static void headphonesIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::C
 
 AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
-      listenBtn (theme, PillButton::Style::ibtn, U ("Écouter le SC")),
+      listenBtn (theme, PillButton::Style::ibtn, U ("Écouter")),
       display (theme, p)
 {
     setLookAndFeel (&lnf);
@@ -43,19 +43,22 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     kThr = std::make_unique<ArcKnob> (theme, prm (params::thr), "Threshold", "dB", acc, ArcKnob::Size::md, i0, 0.0f, U (helpThr));
     kRatio = std::make_unique<ArcKnob> (theme, prm (params::ratio), "Ratio", ":1", acc, ArcKnob::Size::md,
         [] (float v) { return v >= 20 ? U ("∞") : (std::fmod (v, 1.0f) > 0 ? String (v, 1) : String ((int) v)); }, 1.0f, U (helpRat));
-    kKnee = std::make_unique<ArcKnob> (theme, prm (params::knee), "Knee", "dB", acc, ArcKnob::Size::sm, i0, 0.0f, U (helpKn));
     kAtk = std::make_unique<ArcKnob> (theme, prm (params::attack), "Attack", "ms", ora, ArcKnob::Size::md,
         [] (float v) { return v < 10 ? String (v, 1) : String (juce::roundToInt (v)); }, 0.1f, U (helpAtk));
     kRel = std::make_unique<ArcKnob> (theme, prm (params::release), "Release", "ms", ora, ArcKnob::Size::md, i0, 10.0f, U (helpRel));
-    kMk = std::make_unique<ArcKnob> (theme, prm (params::makeup), "Makeup", "dB", grn, ArcKnob::Size::sm,
+    kMk = std::make_unique<ArcKnob> (theme, prm (params::makeup), "Makeup", "dB", grn, ArcKnob::Size::xs,
         [] (float v) { return "+" + String (juce::roundToInt (v)); }, 0.0f, U (helpMk));
 
+    rowKnee = std::make_unique<SliderRow> (theme, prm (params::knee), "Knee", [] (float v) { return String (juce::roundToInt (v)) + " dB"; });
+    rowKnee->setTooltip (U (helpKn));
     rowLook = std::make_unique<SliderRow> (theme, prm (params::look), "Lookahead", [] (float v) { return String (v, 1) + " ms"; });
     rowLook->setTooltip (U (helpLook));
     rowScF = std::make_unique<SliderRow> (theme, prm (params::scFreq), "SC Freq", [] (float v) { return params::fmtHz (v); });
     rowScQ = std::make_unique<SliderRow> (theme, prm (params::scQ), "SC Q", [] (float v) { return String (v, 1); });
 
+    detectSeg.onPanel = true; detectSeg.gap = 2; detectSeg.padX = 12;
     detectSeg.attach (prm (params::detect));
+    viewSeg.equalWidths = true; viewSeg.fontSize = 11; viewSeg.gap = 2;
     scBox.addItemList ({ "Off", "HPF", "LPF", "Bell +6" }, 1);
     scBox.setTitle ("Side-chain");
     scBox.setTooltip (U ("Filtre du détecteur : le compresseur réagit seulement à la partie du spectre choisie."));
@@ -78,9 +81,12 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
         bypassed = v > 0.5f; refreshState(); }, nullptr);
     bypassAtt->sendInitialUpdate();   // Bypass du logiciel : la fenêtre s'estompe
     viewSeg.onSelect = [this] (int v) { display.setView (v); proc.ui.setProperty ("view", v, nullptr); };
+    advBtn.setTooltip (U ("Afficher / masquer Knee, Lookahead, Détection et Side-chain"));
+    advBtn.onClick = [this] { setAdvanced (! advOpen, true); };
 
-    body = { kThr.get(), kRatio.get(), kKnee.get(), kAtk.get(), kRel.get(), kMk.get(), rowLook.get(), &detectSeg,
-             &scBox, &listenBtn, rowScF.get(), rowScQ.get(), &display, &viewSeg };
+    advItems = { rowKnee.get(), rowLook.get(), &detectSeg, &scBox, &listenBtn, rowScF.get(), rowScQ.get() };
+    body = { kThr.get(), kRatio.get(), kAtk.get(), kRel.get(), kMk.get(), &display, &viewSeg, &advBtn };
+    body.addArray (advItems);
     for (auto* c : body) content.addAndMakeVisible (c);
     content.addAndMakeVisible (toast);
 
@@ -92,10 +98,11 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
 
     applyTheme();
     const double sc = juce::jlimit (0.6, 2.0, (double) proc.ui.getProperty ("scale", 1.0));   // lu avant que les limites ne redimensionnent
+    setAdvanced ((bool) proc.ui.getProperty ("adv", false), false);   // panneau avancé caché par défaut
     setResizable (true, true);
-    getConstrainer()->setFixedAspectRatio ((double) baseW / baseH);
-    setResizeLimits (baseW * 6 / 10, baseH * 6 / 10, baseW * 2, baseH * 2);
-    setSize (juce::roundToInt (baseW * sc), juce::roundToInt (baseH * sc));
+    getConstrainer()->setFixedAspectRatio ((double) baseW / currentH());
+    setResizeLimits (baseW * 6 / 10, currentH() * 6 / 10, baseW * 2, currentH() * 2);
+    setSize (juce::roundToInt (baseW * sc), juce::roundToInt (currentH() * sc));
     refreshState();
 }
 
@@ -109,6 +116,23 @@ AudioLabCompEditor::~AudioLabCompEditor()
 }
 
 void AudioLabCompEditor::parameterChanged (const juce::String&, float) { triggerAsyncUpdate(); }
+
+// Ouvre / ferme le panneau « Réglages avancés » : la fenêtre grandit ou rétrécit de 142 px (à l'échelle)
+void AudioLabCompEditor::setAdvanced (bool open, bool resizeWindow)
+{
+    advOpen = open;
+    proc.ui.setProperty ("adv", open, nullptr);
+    advBtn.open = open; advBtn.repaint();
+    for (auto* c : advItems) c->setVisible (open);
+    if (resizeWindow)
+    {
+        const double s = (double) getWidth() / baseW;   // échelle actuelle, lue avant de changer les limites
+        getConstrainer()->setFixedAspectRatio ((double) baseW / currentH());
+        setResizeLimits (baseW * 6 / 10, currentH() * 6 / 10, baseW * 2, currentH() * 2);
+        setSize (juce::roundToInt (baseW * s), juce::roundToInt (currentH() * s));
+    }
+    resized();
+}
 void AudioLabCompEditor::handleAsyncUpdate() { refreshState(); }
 
 void AudioLabCompEditor::applyTheme()
@@ -135,7 +159,7 @@ void AudioLabCompEditor::resized()
 {
     const float s = (float) getWidth() / baseW;
     content.setTransform (juce::AffineTransform::scale (s));
-    content.setBounds (0, 0, baseW, baseH);
+    content.setBounds (0, 0, baseW, currentH());
     proc.ui.setProperty ("scale", (double) s, nullptr);
 }
 
@@ -143,33 +167,40 @@ void AudioLabCompEditor::Content::paint (juce::Graphics& g)
 {
     const auto& p = ed.theme.pal();
     g.fillAll (p.bg2);
-    // libellés de la ligne Détection / Side-chain
+    if (! ed.advOpen) return;
+    // panneau des réglages avancés + libellés des lignes Détection / Side-chain
     const float a = ed.bypassed ? 0.35f : 1.0f;
+    g.setColour (p.bg3.withMultipliedAlpha (a)); g.fillRoundedRectangle (24, 354, 532, 126, 12);
     g.setColour (p.dim.withMultipliedAlpha (a)); g.setFont (ed.theme.ui (12));
-    g.drawText (U ("Détection"), juce::Rectangle<float> (20, 334, 80, 28), juce::Justification::centredLeft, false);
-    g.drawText (U ("Side‑chain"), juce::Rectangle<float> (20, 370, 80, 28), juce::Justification::centredLeft, false);
+    g.drawText (U ("Détection"), juce::Rectangle<float> (40, 438, 64, 26), juce::Justification::centredLeft, false);
+    g.drawText (U ("Side‑chain"), juce::Rectangle<float> (306, 370, 64, 26), juce::Justification::centredLeft, false);
 }
 
+// Grille de 24 px (voir docs/06_GUI_Plugin_Compresseur.md)
 void AudioLabCompEditor::Content::resized()
 {
     auto& e = ed;
-    // Corps : deux colonnes
-    const int colW = (baseW - 40 - 18) / 2, lx = 20, rx = 20 + colW + 18, top = 18;
-    const int cw = colW / 3;
-    ArcKnob* row1[] = { e.kThr.get(), e.kRatio.get(), e.kKnee.get() };
-    ArcKnob* row2[] = { e.kAtk.get(), e.kRel.get(), e.kMk.get() };
-    for (int i = 0; i < 3; ++i)
-    {
-        row1[i]->setBounds (lx + i * cw, top, cw, 130);
-        row2[i]->setBounds (lx + i * cw, top + 140, cw, 130);
-    }
-    e.rowLook->setBounds (lx, 296, colW, 32);
-    e.detectSeg.setBounds (lx + 86, 334, juce::roundToInt (e.detectSeg.idealWidth()), 28);
-    e.scBox.setBounds (lx + 86, 370, 104, 28);
-    e.listenBtn.setBounds (lx + 86 + 104 + 10, 371, juce::roundToInt (e.listenBtn.idealWidth()), 26);
-    e.rowScF->setBounds (lx, 404, colW, 32);
-    e.rowScQ->setBounds (lx, 438, colW, 32);
-    e.display.setBounds (rx, top, colW, baseH - 18 - 36 - top);
-    e.viewSeg.setBounds (rx, baseH - 18 - 28, juce::roundToInt (e.viewSeg.idealWidth()), 28);
+    // 4 gros potentiomètres en 2 × 2 (centres x 75,5 / 202,5 ; y 76 / 223)
+    e.kThr->setBounds (4, 20, 143, 130);
+    e.kRatio->setBounds (131, 20, 143, 130);
+    e.kAtk->setBounds (4, 167, 143, 130);
+    e.kRel->setBounds (131, 167, 143, 130);
+    // écran carré
+    e.display.setBounds (286, 24, 270, 270);
+    // rangée du bas : flèche à gauche ; sélecteur de vue + petit Make-up sur la largeur de l'écran
+    e.advBtn.setBounds (16, 310, juce::roundToInt (e.advBtn.idealWidth()), 28);
+    const int mkW = juce::roundToInt (e.kMk->idealWidth());
+    e.kMk->setBounds (286 + 270 - mkW, 310, mkW, 28);
+    e.viewSeg.setBounds (286, 310, 270 - 8 - mkW, 28);
+    // panneau avancé : 2 colonnes de 234 px, 3 lignes de 26 px
+    const int L = 40, R = 306, cw = 234, y0 = 370, y1 = 404, y2 = 438;
+    e.rowKnee->setBounds (L, y0, cw, 26);
+    e.rowLook->setBounds (L, y1, cw, 26);
+    e.detectSeg.setBounds (L + 74, y2, juce::roundToInt (e.detectSeg.idealWidth()), 26);
+    e.scBox.setBounds (R + 74, y0, 66, 26);
+    const int lw = juce::roundToInt (e.listenBtn.idealWidth());
+    e.listenBtn.setBounds (R + cw - lw, y0, lw, 26);
+    e.rowScF->setBounds (R, y1, cw, 26);
+    e.rowScQ->setBounds (R, y2, cw, 26);
     e.toast.setBounds (getLocalBounds());
 }

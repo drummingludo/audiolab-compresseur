@@ -12,11 +12,25 @@ inline void softShadow (juce::Graphics& g, const juce::Path& p, juce::Colour c, 
     juce::DropShadow (c, radius, offset).drawForPath (g, p);
 }
 
+// Halo léger autour d'un trait (≈ flou gaussien de 2 px, opacité 55 %, comme la maquette validée)
+inline void glowStroke (juce::Graphics& g, const juce::Path& path, juce::Colour c, float width, float k = 1.0f)
+{
+    const float extra[] = { 6.0f * k, 3.6f * k, 1.6f * k };
+    const float alpha[] = { 0.05f, 0.10f, 0.18f };
+    for (int i = 0; i < 3; ++i)
+    {
+        g.setColour (c.withMultipliedAlpha (alpha[i]));
+        g.strokePath (path, juce::PathStrokeType (width + extra[i], juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+    }
+}
+
 // ── Potentiomètre à arc (opKnob) ─────────────────────────────────────────
+// md : gros bouton (arc Ø 98, capuchon 74, valeur au centre, nom dessous)
+// xs : petit bouton de 28 px, légende (nom + valeur) à sa gauche — utilisé pour le Make-up
 class ArcKnob : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    enum class Size { md, sm };
+    enum class Size { md, xs };
 
     ArcKnob (Theme& t, juce::RangedAudioParameter& prm, juce::String label, juce::String unit,
              std::function<juce::Colour (const Pal&)> colour, Size size, std::function<juce::String (float)> format,
@@ -33,47 +47,90 @@ public:
         attachment.sendInitialUpdate();
     }
 
-    float knobDiameter() const { return sz == Size::md ? 112.0f : 84.0f; }
+    // Largeur de la légende du petit bouton (nom au-dessus, valeur dessous)
+    float captionWidth() const
+    {
+        auto w = [] (const juce::Font& f, const juce::String& t) { juce::GlyphArrangement ga; ga.addLineOfText (f, t, 0, 0); return ga.getBoundingBox (0, -1, true).getWidth(); };
+        return std::ceil (std::max (w (theme.ui (9, 600, 0.04f), labelText.toUpperCase()),
+                                    w (theme.mono (10), fmt (param.convertFrom0to1 (1.0f)) + " " + unitText)));
+    }
+    float idealWidth() const { return sz == Size::xs ? captionWidth() + 6 + 28 : 143.0f; }
 
     void paint (juce::Graphics& g) override
     {
         const auto& p = theme.pal();
-        const float S = knobDiameter(), s = S / 150.0f;
-        const float cx = getWidth() * 0.5f, top = (sz == Size::sm ? 14.0f : 0.0f);
-        const float cy = top + S * 0.5f, r = 66 * s, sw = 7 * s;
+        const bool xs = sz == Size::xs;
+        const float cx = xs ? (float) getWidth() - 14.0f : getWidth() * 0.5f;
+        const float cy = xs ? getHeight() * 0.5f : 56.0f;
+        const float r = xs ? 11.5f : 49.0f, sw = xs ? 2.4f : 5.2f, cd = xs ? 16.0f : 74.0f, k = xs ? 0.6f : 1.0f;
         const float A0 = -135.0f * juce::MathConstants<float>::pi / 180, A1 = -A0;
         const float n = param.getValue();
         auto ang = [&] (float t) { return A0 + (A1 - A0) * t; };
+        auto pt = [&] (float a, float rad) { return juce::Point<float> (cx + std::sin (a) * rad, cy - std::cos (a) * rad); };
+        const juce::Colour col = colourFn (p);
 
+        // rail gris (bouts ronds)
         juce::Path trk; trk.addCentredArc (cx, cy, r, r, 0, A0, A1, true);
         g.setColour (p.bg4); g.strokePath (trk, juce::PathStrokeType (sw, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        // arc de valeur : bout mobile coupé droit, départ arrondi, léger halo
         const float a = ang (n), az = ang (zeroNorm);
         if (std::abs (a - az) >= 0.004f)
         {
             juce::Path arc; arc.addCentredArc (cx, cy, r, r, 0, std::min (a, az), std::max (a, az), true);
-            g.setColour (colourFn (p));
-            g.strokePath (arc, juce::PathStrokeType (sw, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const auto z = pt (az, r);
+            juce::Path dot; dot.addEllipse (z.x - sw / 2, z.y - sw / 2, sw, sw);
+            glowStroke (g, arc, col, sw, k);
+            for (float e : { 6.0f * k, 3.6f * k, 1.6f * k })
+            {
+                g.setColour (col.withMultipliedAlpha (e > 5 * k ? 0.05f : e > 3 * k ? 0.10f : 0.18f));
+                g.fillEllipse (z.x - (sw + e) / 2, z.y - (sw + e) / 2, sw + e, sw + e);
+            }
+            g.setColour (col);
+            g.strokePath (arc, juce::PathStrokeType (sw, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+            g.fillPath (dot);
         }
         // capuchon
-        const float cd = sz == Size::md ? 74.0f : 56.0f;
         juce::Path cap; cap.addEllipse (cx - cd / 2, cy - cd / 2, cd, cd);
-        softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.45f : 0.14f), 20, { 0, 8 });
-        softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.4f : 0.08f), 2, { 0, 1 });
+        if (xs)
+        {
+            softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.45f : 0.16f), 5, { 0, 2 });
+            softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.4f : 0.10f), 2, { 0, 1 });
+        }
+        else
+        {
+            softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.45f : 0.14f), 20, { 0, 8 });
+            softShadow (g, cap, juce::Colours::black.withAlpha (p.dark ? 0.4f : 0.08f), 2, { 0, 1 });
+        }
         g.setColour (p.bg2); g.fillPath (cap);
+        // repère : trait fin collé au bord du capuchon, dirigé vers la valeur
+        {
+            juce::Path m; const auto p1 = pt (a, cd / 2), p2 = pt (a, cd / 2 - (xs ? 3.5f : 8.0f));
+            m.startNewSubPath (p1); m.lineTo (p2);
+            g.setColour (col); g.strokePath (m, juce::PathStrokeType (xs ? 1.2f : 1.5f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+        }
         if (focused)
         {
-            g.setColour (p.accent); g.drawEllipse (cx - S / 2 + 1.5f, cy - S / 2 + 1.5f, S - 3, S - 3, 3.0f);
+            const float fr = r + sw / 2 + 3;
+            g.setColour (p.accent.withAlpha (0.6f)); g.drawEllipse (cx - fr, cy - fr, 2 * fr, 2 * fr, 2.0f);
+        }
+        if (xs)
+        {
+            // légende à gauche du petit bouton : NOM / valeur
+            const float right = cx - 14 - 6;
+            g.setColour (p.text); g.setFont (theme.ui (9, 600, 0.04f));
+            g.drawText (labelText.toUpperCase(), juce::Rectangle<float> (0, cy - 12.5f, right, 11), juce::Justification::centredRight, false);
+            g.setColour (p.dim); g.setFont (theme.mono (10));
+            g.drawText (fmt (param.convertFrom0to1 (n)) + " " + unitText, juce::Rectangle<float> (0, cy - 0.5f, right, 12), juce::Justification::centredRight, false);
+            return;
         }
         // valeur + unité
-        const float vs = sz == Size::md ? 18.0f : 13.0f, us = sz == Size::md ? 11.0f : 9.0f;
-        g.setColour (p.text); g.setFont (theme.ui (vs, 600, -0.02f));
-        g.drawText (fmt (param.convertFrom0to1 (n)), juce::Rectangle<float> (cx - cd / 2, cy - vs * 0.78f, cd, vs * 1.2f), juce::Justification::centred, false);
-        g.setColour (p.muted); g.setFont (theme.ui (us));
-        g.drawText (unitText, juce::Rectangle<float> (cx - cd / 2, cy + vs * 0.38f, cd, us * 1.3f), juce::Justification::centred, false);
-        // libellé
+        g.setColour (p.text); g.setFont (theme.ui (18, 600, -0.02f));
+        g.drawText (fmt (param.convertFrom0to1 (n)), juce::Rectangle<float> (cx - cd / 2, cy - 18 * 0.78f, cd, 18 * 1.2f), juce::Justification::centred, false);
+        g.setColour (p.muted); g.setFont (theme.ui (11));
+        g.drawText (unitText, juce::Rectangle<float> (cx - cd / 2, cy + 18 * 0.38f, cd, 11 * 1.3f), juce::Justification::centred, false);
+        // libellé (58 px sous le centre)
         g.setColour (p.text); g.setFont (theme.ui (11, 600, 0.06f));
-        const float ly = top + S + (sz == Size::sm ? 14.0f : 0.0f) + 2;
-        g.drawText (labelText.toUpperCase(), juce::Rectangle<float> (0, ly, (float) getWidth(), 16), juce::Justification::centredTop, false);
+        g.drawText (labelText.toUpperCase(), juce::Rectangle<float> (0, cy + 58, (float) getWidth(), 14), juce::Justification::centredTop, false);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -212,6 +269,10 @@ class SegButtons : public juce::Component
 public:
     SegButtons (Theme& t, juce::StringArray opts) : theme (t), options (std::move (opts)) {}
 
+    bool equalWidths = false;   // segments de même largeur (sélecteur de vue)
+    bool onPanel = false;       // posé sur le panneau gris : bande un ton plus foncé
+    float fontSize = 12, gap = 4, padX = 10;
+
     // Relie à un paramètre « choix » (Peak/RMS…)
     void attach (juce::RangedAudioParameter& prm)
     {
@@ -228,15 +289,15 @@ public:
     float idealWidth() const
     {
         float w = 6;
-        for (auto& o : options) w += textWidth (o) + 20 + 4;
-        return w - 4;
+        for (auto& o : options) w += textWidth (o) + 2 * padX + gap;
+        return w - gap;
     }
 
     void paint (juce::Graphics& g) override
     {
         const auto& p = theme.pal();
         auto b = getLocalBounds().toFloat();
-        g.setColour (p.bg3); g.fillRoundedRectangle (b, 9);
+        g.setColour (onPanel ? p.bg4 : p.bg3); g.fillRoundedRectangle (b, 9);
         for (int i = 0; i < options.size(); ++i)
         {
             auto r = cell (i);
@@ -247,7 +308,7 @@ public:
                 g.setColour (p.bg2); g.fillPath (pill);
             }
             g.setColour (i == selected || i == hover ? p.text : p.dim);
-            g.setFont (theme.ui (12));
+            g.setFont (theme.ui (fontSize));
             g.drawText (options[i], r, juce::Justification::centred, false);
         }
     }
@@ -262,14 +323,20 @@ public:
 private:
     float textWidth (const juce::String& s) const
     {
-        juce::GlyphArrangement ga; ga.addLineOfText (theme.ui (12), s, 0, 0);
+        juce::GlyphArrangement ga; ga.addLineOfText (theme.ui (fontSize), s, 0, 0);
         return ga.getBoundingBox (0, -1, true).getWidth();
     }
     juce::Rectangle<float> cell (int i) const
     {
+        const int n = options.size();
+        if (equalWidths)
+        {
+            const float w = ((float) getWidth() - 6 - gap * (n - 1)) / n;
+            return { 3 + i * (w + gap), 3.0f, w, (float) getHeight() - 6 };
+        }
         float x = 3;
-        for (int k = 0; k < i; ++k) x += textWidth (options[k]) + 20 + 4;
-        return { x, 3.0f, textWidth (options[i]) + 20, (float) getHeight() - 6 };
+        for (int k = 0; k < i; ++k) x += textWidth (options[k]) + 2 * padX + gap;
+        return { x, 3.0f, textWidth (options[i]) + 2 * padX, (float) getHeight() - 6 };
     }
     int hit (juce::Point<float> pt) const
     {
@@ -302,7 +369,7 @@ public:
         const float a = dimmed ? 0.4f : 1.0f;
         const float h = (float) getHeight(), cy = h * 0.5f;
         g.setColour (p.dim.withMultipliedAlpha (a)); g.setFont (theme.ui (12));
-        g.drawText (labelText, juce::Rectangle<float> (0, 0, 76, h), juce::Justification::centredLeft, false);
+        g.drawText (labelText, juce::Rectangle<float> (0, 0, 64, h), juce::Justification::centredLeft, false);
         auto tr = track();
         g.setColour (p.bg4.withMultipliedAlpha (a)); g.fillRoundedRectangle (tr.getX(), cy - 2, tr.getWidth(), 4, 2);
         const float x = tr.getX() + 9 + (tr.getWidth() - 18) * param.getValue();
@@ -312,7 +379,7 @@ public:
         g.setColour (juce::Colours::black.withAlpha (0.08f * a)); g.strokePath (th, juce::PathStrokeType (0.5f));
         if (focused) { g.setColour (p.accent.withAlpha (0.3f)); g.drawEllipse (x - 10.5f, cy - 10.5f, 21, 21, 3); }
         g.setColour (p.text.withMultipliedAlpha (a)); g.setFont (theme.mono (12));
-        g.drawText (fmt (param.convertFrom0to1 (param.getValue())), juce::Rectangle<float> ((float) getWidth() - 60, 0, 60, h), juce::Justification::centredRight, false);
+        g.drawText (fmt (param.convertFrom0to1 (param.getValue())), juce::Rectangle<float> ((float) getWidth() - 48, 0, 48, h), juce::Justification::centredRight, false);
     }
     void mouseDown (const juce::MouseEvent& e) override { attachment.beginGesture(); drag (e); }
     void mouseDrag (const juce::MouseEvent& e) override { drag (e); }
@@ -333,7 +400,7 @@ public:
     void focusLost (FocusChangeType) override { focused = false; repaint(); }
 
 private:
-    juce::Rectangle<float> track() const { return { 86.0f, 0, (float) getWidth() - 86 - 70, (float) getHeight() }; }
+    juce::Rectangle<float> track() const { return { 74.0f, 0, (float) getWidth() - 74 - 58, (float) getHeight() }; }
     void drag (const juce::MouseEvent& e)
     {
         auto tr = track();
@@ -364,7 +431,7 @@ public:
     {
         const auto& p = theme.pal();
         auto b = getLocalBounds().toFloat().reduced (0.5f);
-        juce::Colour bg = p.bg3, fg = p.text, br = juce::Colours::transparentBlack;
+        juce::Colour bg = style == Style::ibtn ? p.bg2 : p.bg3, fg = p.text, br = juce::Colours::transparentBlack;
         float rad = 8;
         juce::String txt = getButtonText();
         if (style == Style::rst) fg = p.dim;
@@ -401,11 +468,20 @@ public:
             g.setColour (p.red); g.fillEllipse (b.getCentreX() - 4, b.getCentreY() - 4, 8, 8);
             return;
         }
-        auto tb = b;
-        if (icon) { icon (g, tb.removeFromLeft (b.getHeight()).reduced (5).translated (4, 0), fg); }
-        g.setColour (fg);
         g.setFont (style == Style::bp ? theme.ui (11, 600) : style == Style::snap ? theme.ui (11, 600) : theme.ui (12, 400));
-        g.drawText (txt, tb, juce::Justification::centred, false);
+        if (icon)
+        {
+            // [10 px][icône 13 px][6 px][texte][10 px], le tout centré dans le bouton
+            juce::GlyphArrangement ga; ga.addLineOfText (g.getCurrentFont(), txt, 0, 0);
+            const float tw = ga.getBoundingBox (0, -1, true).getWidth();
+            const float x0 = b.getCentreX() - (13 + 6 + tw) / 2;
+            icon (g, juce::Rectangle<float> (x0, b.getY(), 13, b.getHeight()), fg);
+            g.setColour (fg);
+            g.drawText (txt, juce::Rectangle<float> (x0 + 19, b.getY(), tw + 4, b.getHeight()), juce::Justification::centredLeft, false);
+            return;
+        }
+        g.setColour (fg);
+        g.drawText (txt, b, juce::Justification::centred, false);
     }
 
     float idealWidth() const
@@ -413,12 +489,42 @@ public:
         if (style == Style::snap) return 26;
         const juce::String t = style == Style::bp ? juce::String ("Bypass") : getButtonText();
         juce::GlyphArrangement ga; ga.addLineOfText (style == Style::bp ? theme.ui (11, 600) : theme.ui (12), t, 0, 0);
-        return ga.getBoundingBox (0, -1, true).getWidth() + (style == Style::bp ? 20 : 22) + (icon ? 18 : 0);
+        return ga.getBoundingBox (0, -1, true).getWidth() + (style == Style::bp ? 20 : 20) + (icon ? 19 : 0);
     }
 
 private:
     Theme& theme;
     Style style;
+};
+
+// ── Flèche d'ouverture (« Réglages avancés ») ────────────────────────────
+class Disclosure : public juce::Button
+{
+public:
+    Disclosure (Theme& t, juce::String label) : juce::Button (label), theme (t) {}
+    bool open = false;
+
+    void paintButton (juce::Graphics& g, bool over, bool) override
+    {
+        const auto& p = theme.pal();
+        const juce::Colour c = open || over ? p.text : p.dim;
+        const float x = 8, y = getHeight() * 0.5f - 6;   // boîte 12 × 12 du chevron
+        juce::Path ch;
+        if (open) { ch.startNewSubPath (x + 2.5f, y + 4.5f); ch.lineTo (x + 6, y + 8); ch.lineTo (x + 9.5f, y + 4.5f); }
+        else      { ch.startNewSubPath (x + 4.5f, y + 2.5f); ch.lineTo (x + 8, y + 6); ch.lineTo (x + 4.5f, y + 9.5f); }
+        g.setColour (c);
+        g.strokePath (ch, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.setFont (theme.ui (12));
+        g.drawText (getButtonText(), juce::Rectangle<float> (26, 0, (float) getWidth() - 26, (float) getHeight()), juce::Justification::centredLeft, false);
+    }
+    float idealWidth() const
+    {
+        juce::GlyphArrangement ga; ga.addLineOfText (theme.ui (12), getButtonText(), 0, 0);
+        return 26 + ga.getBoundingBox (0, -1, true).getWidth() + 8;
+    }
+
+private:
+    Theme& theme;
 };
 
 // ── Menus déroulants (select) ────────────────────────────────────────────
@@ -442,16 +548,17 @@ public:
     {
         const auto& p = theme.pal();
         auto b = juce::Rectangle<float> (0, 0, (float) w, (float) h);
-        g.setColour (box.isMouseOver (true) ? p.bg4 : p.bg3); g.fillRoundedRectangle (b, 8);
+        g.setColour (box.isMouseOver (true) ? p.bg4 : p.bg2); g.fillRoundedRectangle (b, 8);
         if (box.hasKeyboardFocus (true)) { g.setColour (p.accent.withAlpha (0.3f)); g.drawRoundedRectangle (b.reduced (1), 8, 2); }
-        juce::Path chev; const float cx = (float) w - 15, cy = h * 0.5f;
+        juce::Path chev; const float cx = (float) w - 13, cy = h * 0.5f;
         chev.startNewSubPath (cx - 4, cy - 2); chev.lineTo (cx, cy + 2); chev.lineTo (cx + 4, cy - 2);
         g.setColour (p.dim); g.strokePath (chev, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
     juce::Font getComboBoxFont (juce::ComboBox&) override { return theme.ui (12); }
     void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
     {
-        label.setBounds (4, 0, box.getWidth() - 28, box.getHeight());
+        label.setBorderSize ({ 0, 0, 0, 0 });
+        label.setBounds (10, 0, box.getWidth() - 30, box.getHeight());
         label.setFont (getComboBoxFont (box));
     }
     juce::Font getPopupMenuFont() override { return theme.ui (13); }

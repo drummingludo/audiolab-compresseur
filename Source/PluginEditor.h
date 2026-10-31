@@ -15,7 +15,8 @@ public:
     void paint (juce::Graphics&) override {}
     void resized() override;
 
-    static constexpr int baseW = 920, baseH = 508;
+    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md) : 580 × 362 replié, 580 × 504 déplié
+    static constexpr int baseW = 580, baseH = 362, baseHOpen = 504;
 
 private:
     // Contenu dessiné à taille fixe puis mis à l'échelle (fenêtre redimensionnable, proportions fixes)
@@ -33,6 +34,8 @@ private:
     void applyTheme();
     void refreshState();
     void darkModeSettingChanged() override { applyTheme(); }   // le thème suit celui du Mac / de Windows
+    void setAdvanced (bool open, bool resizeWindow);
+    int currentH() const { return advOpen ? baseHOpen : baseH; }
 
     AudioLabCompProcessor& proc;
     audiolab::Theme theme;
@@ -42,18 +45,19 @@ private:
 
     std::unique_ptr<juce::ParameterAttachment> bypassAtt, listenAtt;
 
-    std::unique_ptr<audiolab::ArcKnob> kThr, kRatio, kKnee, kAtk, kRel, kMk;
-    std::unique_ptr<audiolab::SliderRow> rowLook, rowScF, rowScQ;
+    std::unique_ptr<audiolab::ArcKnob> kThr, kRatio, kAtk, kRel, kMk;
+    std::unique_ptr<audiolab::SliderRow> rowKnee, rowLook, rowScF, rowScQ;
     audiolab::SegButtons detectSeg { theme, { "Peak", "RMS" } };
     juce::ComboBox scBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> scAtt;
     audiolab::PillButton listenBtn;
     audiolab::CompDisplay display;
-    audiolab::SegButtons viewSeg { theme, { "Transfert", juce::String::fromUTF8 ("Activité"), juce::String::fromUTF8 ("Mètres") } };
+    audiolab::SegButtons viewSeg { theme, { "Transfert", juce::String::fromUTF8 ("Activité"), juce::String::fromUTF8 ("Vu-Mètres") } };
+    audiolab::Disclosure advBtn { theme, juce::String::fromUTF8 ("Réglages avancés") };
     audiolab::Toast toast { theme };
 
-    juce::Array<juce::Component*> body;
-    bool bypassed = false;
+    juce::Array<juce::Component*> body, advItems;
+    bool bypassed = false, advOpen = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioLabCompEditor)
 };

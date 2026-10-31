@@ -54,16 +54,33 @@ int main (int argc, char** argv)
     };
     auto bypass = [&] (float v) { proc->apvts.getParameter (audiolab::params::bypass)->setValueNotifyingHost (v); };
 
-    steps.push_back ({ 0,    [&] { proc->ui.setProperty ("themeOverride", "light", nullptr); proc->applyPreset (0); rebuild(); } });
-    steps.push_back ({ 1500, [&] { shot ("01_clair_transfert_voix"); setView (2); rebuild(); } });
-    steps.push_back ({ 1500, [&] { shot ("02_clair_metres_voix"); setView (1); rebuild(); } });
-    steps.push_back ({ 2500, [&] { shot ("03_clair_activite_voix"); proc->ui.setProperty ("themeOverride", "dark", nullptr); proc->applyPreset (2); setView (0); rebuild(); } });
-    steps.push_back ({ 1500, [&] { shot ("04_sombre_transfert_pompage"); setView (2); rebuild(); } });
-    steps.push_back ({ 1500, [&] { shot ("05_sombre_metres_pompage"); proc->applyPreset (4); setView (0); rebuild(); } });
-    steps.push_back ({ 1200, [&] { shot ("06_sombre_sidechain"); bypass (1.0f); rebuild(); } });
-    steps.push_back ({ 600,  [&] { shot ("07_sombre_bypass"); bypass (0.0f); proc->ui.setProperty ("themeOverride", "light", nullptr); proc->applyPreset (-1); rebuild();
+    auto adv = [&] (bool o) { proc->ui.setProperty ("adv", o, nullptr); };
+    auto theme = [&] (const char* t) { proc->ui.setProperty ("themeOverride", t, nullptr); };
+
+    steps.push_back ({ 0,    [&] { theme ("light"); adv (false); proc->applyPreset (0); setView (0); rebuild(); } });
+    steps.push_back ({ 1500, [&] { shot ("01_clair_replie_transfert"); setView (1); rebuild(); } });
+    steps.push_back ({ 2500, [&] { shot ("02_clair_replie_activite"); setView (2); rebuild(); } });
+    steps.push_back ({ 1500, [&] { shot ("03_clair_replie_vumetres"); adv (true); setView (0); rebuild(); } });
+    steps.push_back ({ 1200, [&] { shot ("04_clair_deplie_transfert"); theme ("dark"); proc->applyPreset (2); rebuild(); } });
+    steps.push_back ({ 1500, [&] { shot ("05_sombre_deplie_pompage"); adv (false); setView (2); rebuild(); } });
+    steps.push_back ({ 1500, [&] { shot ("06_sombre_replie_vumetres"); setView (1); rebuild(); } });
+    steps.push_back ({ 2500, [&] { shot ("07_sombre_replie_activite"); proc->applyPreset (4); adv (true); setView (0); rebuild(); } });
+    steps.push_back ({ 1200, [&] { shot ("08_sombre_deplie_sidechain"); bypass (1.0f); rebuild(); } });
+    steps.push_back ({ 600,  [&] { shot ("09_sombre_bypass"); bypass (0.0f); theme ("light"); proc->applyPreset (-1); adv (false); rebuild();
                                    ed->setSize (AudioLabCompEditor::baseW * 6 / 10, AudioLabCompEditor::baseH * 6 / 10); } });
-    steps.push_back ({ 800,  [&] { shot ("08_clair_petite_taille_default"); juce::MessageManager::getInstance()->stopDispatchLoop(); } });
+    steps.push_back ({ 800,  [&] { shot ("10_clair_petite_taille_default");
+                                   // ouverture du panneau par la flèche, à 60 % : la fenêtre doit grandir dans les mêmes proportions
+                                   for (auto* c : ed->getChildren().getFirst()->getChildren())
+                                       if (auto* d = dynamic_cast<audiolab::Disclosure*> (c)) d->triggerClick(); } });
+    steps.push_back ({ 800,  [&] { std::printf ("taille apres ouverture : %dx%d (attendu %dx%d)\n", ed->getWidth(), ed->getHeight(),
+                                                juce::roundToInt (AudioLabCompEditor::baseW * 0.6), juce::roundToInt (AudioLabCompEditor::baseHOpen * 0.6));
+                                   shot ("11_clair_petite_taille_deplie");
+                                   for (auto* c : ed->getChildren().getFirst()->getChildren())
+                                       if (auto* d = dynamic_cast<audiolab::Disclosure*> (c)) d->triggerClick(); } });
+    steps.push_back ({ 800,  [&] { std::printf ("taille apres fermeture : %dx%d (attendu %dx%d)\n", ed->getWidth(), ed->getHeight(),
+                                                juce::roundToInt (AudioLabCompEditor::baseW * 0.6), juce::roundToInt (AudioLabCompEditor::baseH * 0.6));
+                                   ed->setSize (AudioLabCompEditor::baseW * 2, AudioLabCompEditor::baseH * 2); } });
+    steps.push_back ({ 800,  [&] { shot ("12_clair_200pc"); juce::MessageManager::getInstance()->stopDispatchLoop(); } });
 
     std::function<void (size_t)> next = [&] (size_t i)
     {
