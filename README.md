@@ -8,10 +8,11 @@ Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en pl
 
 ## Télécharger
 
-Page **Releases** du dépôt :
+Chaque fabrication produit deux archives (onglet **Actions** > dernière fabrication > *Artifacts*) :
 - `AudioLabCompresseur-Mac.zip` : VST3 + AU, Apple Silicon et Intel, avec un installateur en un double-clic.
 - `AudioLabCompresseur-Windows.zip` : VST3 64 bits.
 
+Pour une version durable sur la page **Releases**, créer un tag `v…` : la fabrication y dépose alors les deux archives.
 Mode d'emploi : fichier `LISEZ-MOI.txt` dans chaque archive. Pro Tools n'est pas compatible (format AAX).
 
 ## Fabrication
