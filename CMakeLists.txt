@@ -69,7 +69,6 @@ target_compile_definitions(AudioLabCompresseur PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_REPORT_APP_USAGE=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_MODAL_LOOPS_PERMITTED=0)
 
 target_link_libraries(AudioLabCompresseur

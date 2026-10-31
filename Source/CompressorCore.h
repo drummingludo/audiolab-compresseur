@@ -10,6 +10,9 @@
 
 namespace audiolab
 {
+// π en double (= Math.PI en JavaScript) ; M_PI n'existe pas sous Windows
+inline constexpr double kPi = 3.14159265358979323846;
+
 // Biquad du side-chain (RBJ), forme transposée directe II — identique au Biquad JS.
 struct Biquad
 {
@@ -19,7 +22,7 @@ struct Biquad
 
     void set (int type, double f, double Q, double fs)
     {
-        const double w  = 2.0 * M_PI * std::max (10.0, std::min (fs * 0.45, f)) / fs;
+        const double w  = 2.0 * kPi * std::max (10.0, std::min (fs * 0.45, f)) / fs;
         const double c  = std::cos (w), sn = std::sin (w);
         const double al = sn / (2.0 * std::max (0.1, Q));
         double nb0, nb1, nb2, a0, na1, na2;
