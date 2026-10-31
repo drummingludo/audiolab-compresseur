@@ -25,6 +25,12 @@ set(ALC_FORMATS VST3)
 if(APPLE)
     list(APPEND ALC_FORMATS AU)
 endif()
+# AAX (Pro Tools) : SDK Avid fourni avec JUCE (licence GPL v3, compatible AGPLv3).
+# Non signé, il ne se charge que dans Pro Tools Developer ; signature PACE à faire avant diffusion.
+option(ALC_AAX "Fabriquer le format AAX (Mac et Windows)" ON)
+if(ALC_AAX AND (APPLE OR WIN32))
+    list(APPEND ALC_FORMATS AAX)
+endif()
 if(ALC_STANDALONE)
     list(APPEND ALC_FORMATS Standalone)
 endif()
@@ -47,6 +53,7 @@ juce_add_plugin(AudioLabCompresseur
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     VST3_CATEGORIES Fx Dynamics
     AU_MAIN_TYPE kAudioUnitType_Effect
+    AAX_CATEGORY AAX_ePlugInCategory_Dynamics
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
 juce_add_binary_data(ALCData SOURCES

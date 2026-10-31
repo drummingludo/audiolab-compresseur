@@ -17,6 +17,13 @@ INSTALLATION MANUELLE (sans le script)
 - Audio Lab Compresseur.vst3      → ~/Library/Audio/Plug-Ins/VST3/
 - Audio Lab Compresseur.component → ~/Library/Audio/Plug-Ins/Components/
 
-NON COMPATIBLE : Pro Tools (format AAX uniquement).
+PRO TOOLS (format AAX) — VERSION DE TEST
+Le dossier « Pro Tools (AAX non signé) » contient Audio Lab Compresseur.aaxplugin.
+Il n'a pas encore la signature numérique PACE exigée par Pro Tools : il se charge
+uniquement dans Pro Tools Developer (version de test réservée aux développeurs Avid).
+- Pro Tools Developer : créez un dossier nommé « Plug-Ins » à côté de l'application
+  Pro Tools Developer et copiez-y Audio Lab Compresseur.aaxplugin, puis lancez-la.
+- Dans Pro Tools, le plugin se trouve dans la catégorie Dynamics (fabricant : Transversal Studio).
+- Pro Tools « normal » refusera ce fichier tant qu'il n'est pas signé.
 
 Code source et licence (AGPLv3) : https://github.com/drummingludo/audiolab-compresseur

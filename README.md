@@ -1,6 +1,6 @@
 # Audio Lab Compresseur
 
-Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en plugin **VST3 / AU** pour Logic Pro, Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig…
+Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en plugin **VST3 / AU** pour Logic Pro, Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig…, et **AAX** pour Pro Tools (version de test non signée, voir plus bas).
 
 - **Même son que l'outil web** : le moteur est un portage ligne à ligne du processeur `al-comp` d'`Audio_Lab.html`. Le banc de test compare les deux versions : sortie identique au bit près à 44,1 / 48 / 96 kHz.
 - **Même interface** : potentiomètres à arc, vues Transfert / Activité / Mètres (VU à aiguille), presets pédagogiques avec ce qu'il faut entendre, snapshots A/B/C, Dry/Wet, Bypass, thème clair / sombre, fenêtre redimensionnable.
@@ -13,11 +13,15 @@ Chaque fabrication produit deux archives (onglet **Actions** > dernière fabrica
 - `AudioLabCompresseur-Windows.zip` : VST3 64 bits.
 
 Pour une version durable sur la page **Releases**, créer un tag `v…` : la fabrication y dépose alors les deux archives.
-Mode d'emploi : fichier `LISEZ-MOI.txt` dans chaque archive. Pro Tools n'est pas compatible (format AAX).
+Mode d'emploi : fichier `LISEZ-MOI.txt` dans chaque archive.
+
+### Pro Tools (AAX)
+
+Chaque archive contient aussi `Audio Lab Compresseur.aaxplugin` (Mac universel, Windows 64 bits), fabriqué avec le SDK AAX fourni par JUCE (GPL v3). Il n'est **pas encore signé** par PACE : il ne se charge que dans **Pro Tools Developer**. Particularité AAX : la latence annoncée est fixe (10 ms, lookahead maximal), comme l'exige Pro Tools ; un retard interne complète le lookahead choisi, le son est identique à l'échantillon près au VST3 décalé.
 
 ## Fabrication
 
-Chaque envoi sur `main` déclenche la fabrication sur des machines Mac et Windows de GitHub, puis la validation automatique (`auval` pour l'AU, `pluginval` niveau 10 pour tous les formats). Un tag `v…` publie la version.
+Chaque envoi sur `main` déclenche la fabrication sur des machines Mac et Windows de GitHub, puis la validation automatique (`auval` pour l'AU, `pluginval` niveau 10 pour VST3 et AU ; pour l'AAX, contrôle de structure, d'architectures et du point d'entrée — pluginval ne sait pas charger l'AAX). Un tag `v…` publie la version.
 
 ```
 cmake -B build -DCMAKE_BUILD_TYPE=Release

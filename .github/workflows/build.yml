@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   mac:
-    name: Mac (VST3 + AU, Apple Silicon et Intel)
+    name: Mac (VST3 + AU + AAX, Apple Silicon et Intel)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,14 +19,25 @@ jobs:
       - name: Compiler
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release --target AudioLabCompresseur_VST3 AudioLabCompresseur_AU -j 4
+          cmake --build build --config Release --target AudioLabCompresseur_VST3 AudioLabCompresseur_AU AudioLabCompresseur_AAX -j 4
 
       - name: Signer (signature locale, sans compte Apple)
         run: |
           A=build/AudioLabCompresseur_artefacts/Release
           codesign --force --deep --sign - "$A/VST3/Audio Lab Compresseur.vst3"
           codesign --force --deep --sign - "$A/AU/Audio Lab Compresseur.component"
+          codesign --force --deep --sign - "$A/AAX/Audio Lab Compresseur.aaxplugin"
           lipo -info "$A/VST3/Audio Lab Compresseur.vst3/Contents/MacOS/Audio Lab Compresseur"
+
+      - name: Vérifier l'AAX (structure, architectures, point d'entrée)
+        run: |
+          X="build/AudioLabCompresseur_artefacts/Release/AAX/Audio Lab Compresseur.aaxplugin"
+          B="$X/Contents/MacOS/Audio Lab Compresseur"
+          test -f "$B"
+          lipo "$B" -verify_arch arm64 x86_64
+          plutil -p "$X/Contents/Info.plist" | grep -E "CFBundleIdentifier|CFBundleName|CFBundleShortVersionString"
+          if nm -gU "$B" | grep -q ACFRegisterPlugin; then echo "Point d'entrée AAX exporté"; else echo "Point d'entrée AAX introuvable"; exit 1; fi
+          codesign --verify --deep --strict "$X" && echo "Signature locale valide (signature PACE à ajouter avant diffusion)"
 
       - name: Valider (auval + pluginval)
         run: |
@@ -48,6 +59,8 @@ jobs:
           P="Audio Lab Compresseur - Mac"
           mkdir -p "$P"
           cp -R "$A/VST3/Audio Lab Compresseur.vst3" "$A/AU/Audio Lab Compresseur.component" "$P/"
+          mkdir -p "$P/Pro Tools (AAX non signé)"
+          cp -R "$A/AAX/Audio Lab Compresseur.aaxplugin" "$P/Pro Tools (AAX non signé)/"
           cp packaging/mac/Installer.command packaging/mac/LISEZ-MOI.txt "$P/"
           chmod +x "$P/Installer.command"
           ditto -c -k --sequesterRsrc --keepParent "$P" AudioLabCompresseur-Mac.zip
@@ -58,7 +71,7 @@ jobs:
           path: AudioLabCompresseur-Mac.zip
 
   windows:
-    name: Windows (VST3)
+    name: Windows (VST3 + AAX)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -66,7 +79,7 @@ jobs:
       - name: Compiler
         run: |
           cmake -B build -A x64
-          cmake --build build --config Release --target AudioLabCompresseur_VST3
+          cmake --build build --config Release --target AudioLabCompresseur_VST3 AudioLabCompresseur_AAX
 
       - name: Valider (pluginval)
         shell: pwsh
@@ -82,6 +95,8 @@ jobs:
           $P = "Audio Lab Compresseur - Windows"
           New-Item -ItemType Directory -Force -Path $P | Out-Null
           Copy-Item -Recurse "build\AudioLabCompresseur_artefacts\Release\VST3\Audio Lab Compresseur.vst3" $P
+          New-Item -ItemType Directory -Force -Path "$P\Pro Tools (AAX non signe)" | Out-Null
+          Copy-Item -Recurse "build\AudioLabCompresseur_artefacts\Release\AAX\Audio Lab Compresseur.aaxplugin" "$P\Pro Tools (AAX non signe)"
           Copy-Item packaging\windows\LISEZ-MOI.txt $P
           Compress-Archive -Path $P -DestinationPath AudioLabCompresseur-Windows.zip
 
@@ -109,4 +124,5 @@ jobs:
             Plugin compresseur d'Audio Lab (Transversal Studio).
             - Mac : VST3 + AU, Apple Silicon et Intel (AudioLabCompresseur-Mac.zip)
             - Windows : VST3 64 bits (AudioLabCompresseur-Windows.zip)
+            - Pro Tools : AAX non signé dans chaque archive (Pro Tools Developer uniquement, en attendant la signature PACE)
             Mode d'emploi dans le fichier LISEZ-MOI de chaque archive.

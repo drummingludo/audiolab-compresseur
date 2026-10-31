@@ -10,6 +10,11 @@ INSTALLATION
 Le plugin apparait sous le nom "Audio Lab Compresseur" (fabricant : Transversal Studio)
 dans Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig...
 
-NON COMPATIBLE : Pro Tools (format AAX uniquement).
+PRO TOOLS (format AAX) - VERSION DE TEST
+Le dossier "Pro Tools (AAX non signe)" contient Audio Lab Compresseur.aaxplugin.
+Il n'a pas encore la signature numerique PACE exigee par Pro Tools : il se charge
+uniquement dans Pro Tools Developer (version de test reservee aux developpeurs Avid),
+installe dans C:\Program Files\Common Files\Avid\Audio\Plug-Ins
+Pro Tools "normal" refusera ce fichier tant qu'il n'est pas signe.
 
 Code source et licence (AGPLv3) : https://github.com/drummingludo/audiolab-compresseur

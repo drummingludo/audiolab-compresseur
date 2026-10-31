@@ -64,7 +64,15 @@ void AudioLabCompProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     bypassSm.reset (sampleRate, 0.02);
     bypassSm.setCurrentAndTargetValue (getParam (params::bypass) > 0.5f ? 1.0f : 0.0f);
     rmsIn.clear(); rmsOut.clear();
-    latency = core.lookaheadSamples();
+
+    if (wrapperType == wrapperType_AAX) constantLatency = true;
+    const double lookMaxSec = apvts.getParameterRange (params::look).end / 1000.0;
+    fixedLatency = std::min (maxLook, (int) std::floor (lookMaxSec * sampleRate + 0.5));
+    padL.assign ((size_t) fixedLatency + 1, 0.0f);
+    padR.assign ((size_t) fixedLatency + 1, 0.0f);
+    padW = 0;
+
+    latency = constantLatency ? fixedLatency : core.lookaheadSamples();
     setLatencySamples (latency);
 }
 
@@ -79,7 +87,9 @@ void AudioLabCompProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     const auto p = currentParams();
     core.setParams (p);
     const int look = core.lookaheadSamples();
-    if (look != latency) { latency = look; setLatencySamples (look); }
+    if (! constantLatency && look != latency) { latency = look; setLatencySamples (look); }
+    const int pad = constantLatency ? std::max (0, fixedLatency - look) : 0;
+    const int plen = (int) padL.size();
 
     mixSm.setTargetValue (getParam (params::mix) / 100.0f);
     bypassSm.setTargetValue (getParam (params::bypass) > 0.5f ? 1.0f : 0.0f);
@@ -116,8 +126,16 @@ void AudioLabCompProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
                 pr = dr * gd + wetR[(size_t) i] * gw;
             }
             const float ol = pl * (1 - b) + dl * b, orr = pr * (1 - b) + dr * b;
-            L[off + i] = ol;
-            if (R != nullptr) R[off + i] = orr;
+            float yl = ol, yr = orr;
+            if (constantLatency)
+            {
+                padL[(size_t) padW] = ol; padR[(size_t) padW] = orr;
+                const int pi = (padW - pad + plen) % plen;
+                yl = padL[(size_t) pi]; yr = padR[(size_t) pi];
+                padW = (padW + 1) % plen;
+            }
+            L[off + i] = yl;
+            if (R != nullptr) R[off + i] = yr;
             rmsOut.push (R != nullptr ? (ol + orr) * 0.5f : ol);
         }
     }

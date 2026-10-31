@@ -45,6 +45,11 @@ public:
     bool hasSnapshot (const juce::String& slot) const;
     float getParam (const char* id) const { return apvts.getRawParameterValue (id)->load(); }
 
+    // Pro Tools (AAX) exige une latence qui ne change jamais pendant la lecture : la latence annoncée
+    // est alors fixée au lookahead maximal (10 ms) et un retard interne complète le lookahead choisi.
+    // Activé automatiquement en AAX (prepareToPlay) ; VST3 et AU gardent la latence = lookahead.
+    bool constantLatency = false;
+
     // Mesures pour l'affichage (thread audio → interface)
     struct Meters { float inDb = -80, outDb = -80, grDb = 0, grMaxDb = 0; bool active = false; };
     Meters readMeters();
@@ -62,6 +67,10 @@ private:
     std::vector<float> wetL, wetR, monoR;
     juce::SmoothedValue<float> mixSm, bypassSm;
     int latency = -1;
+
+    // Retard de complément (mode latence constante) : fixedLatency − lookahead
+    std::vector<float> padL, padR;
+    int padW = 0, fixedLatency = 0;
 
     // Valeur efficace sur 4096 échantillons (AnalyserNode fftSize 4096 dans Audio Lab), voies sommées en mono
     struct Rms
