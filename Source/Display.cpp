@@ -134,7 +134,10 @@ void CompDisplay::drawTransfer (Graphics& g, float W, float H, const M& m)
     const auto& p = theme.pal();
     const float mW = 14, gap = 22, pT = 22, pB = 24, pL = 40;
     const float metersW = 3 * mW + 2 * gap;
-    const float cX = pL, cY = pT, cW = W - pL - metersW - 36, cH = H - pT - pB;
+    // Courbe de transfert dans un carré (1 dB en entrée = 1 dB en sortie à l'écran), centré verticalement
+    const float availW = W - pL - metersW - 36, availH = H - pT - pB;
+    const float side = std::min (availW, availH);
+    const float cX = pL, cY = pT + (availH - side) / 2, cW = side, cH = side;
     const float lo = -60;
     auto X = [&] (double d) { return (float) (cX + (d - lo) / (0 - lo) * cW); };
     auto Y = [&] (double d) { return (float) (cY + cH - (d - lo) / (0 - lo) * cH); };

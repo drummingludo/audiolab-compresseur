@@ -54,14 +54,14 @@ int main (int argc, char** argv)
     };
     auto bypass = [&] (float v) { proc->apvts.getParameter (audiolab::params::bypass)->setValueNotifyingHost (v); };
 
-    steps.push_back ({ 0,    [&] { proc->ui.setProperty ("theme", "light", nullptr); proc->applyPreset (0); rebuild(); } });
+    steps.push_back ({ 0,    [&] { proc->ui.setProperty ("themeOverride", "light", nullptr); proc->applyPreset (0); rebuild(); } });
     steps.push_back ({ 1500, [&] { shot ("01_clair_transfert_voix"); setView (2); rebuild(); } });
     steps.push_back ({ 1500, [&] { shot ("02_clair_metres_voix"); setView (1); rebuild(); } });
-    steps.push_back ({ 2500, [&] { shot ("03_clair_activite_voix"); proc->ui.setProperty ("theme", "dark", nullptr); proc->applyPreset (2); setView (0); rebuild(); } });
+    steps.push_back ({ 2500, [&] { shot ("03_clair_activite_voix"); proc->ui.setProperty ("themeOverride", "dark", nullptr); proc->applyPreset (2); setView (0); rebuild(); } });
     steps.push_back ({ 1500, [&] { shot ("04_sombre_transfert_pompage"); setView (2); rebuild(); } });
     steps.push_back ({ 1500, [&] { shot ("05_sombre_metres_pompage"); proc->applyPreset (4); setView (0); rebuild(); } });
     steps.push_back ({ 1200, [&] { shot ("06_sombre_sidechain"); bypass (1.0f); rebuild(); } });
-    steps.push_back ({ 600,  [&] { shot ("07_sombre_bypass"); bypass (0.0f); proc->ui.setProperty ("theme", "light", nullptr); proc->applyPreset (-1); rebuild();
+    steps.push_back ({ 600,  [&] { shot ("07_sombre_bypass"); bypass (0.0f); proc->ui.setProperty ("themeOverride", "light", nullptr); proc->applyPreset (-1); rebuild();
                                    ed->setSize (AudioLabCompEditor::baseW * 6 / 10, AudioLabCompEditor::baseH * 6 / 10); } });
     steps.push_back ({ 800,  [&] { shot ("08_clair_petite_taille_default"); juce::MessageManager::getInstance()->stopDispatchLoop(); } });
 

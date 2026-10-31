@@ -5,7 +5,8 @@
 
 class AudioLabCompEditor : public juce::AudioProcessorEditor,
                            private juce::AudioProcessorValueTreeState::Listener,
-                           private juce::AsyncUpdater
+                           private juce::AsyncUpdater,
+                           private juce::DarkModeSettingListener
 {
 public:
     explicit AudioLabCompEditor (AudioLabCompProcessor&);
@@ -14,7 +15,7 @@ public:
     void paint (juce::Graphics&) override {}
     void resized() override;
 
-    static constexpr int baseW = 920, baseH = 636;
+    static constexpr int baseW = 920, baseH = 508;
 
 private:
     // Contenu dessiné à taille fixe puis mis à l'échelle (fenêtre redimensionnable, proportions fixes)
@@ -31,9 +32,7 @@ private:
     void handleAsyncUpdate() override;
     void applyTheme();
     void refreshState();
-    void snapClicked (int slot, const juce::ModifierKeys& mods);
-    void choosePreset (int index);
-    juce::String noteText() const;
+    void darkModeSettingChanged() override { applyTheme(); }   // le thème suit celui du Mac / de Windows
 
     AudioLabCompProcessor& proc;
     audiolab::Theme theme;
@@ -41,16 +40,8 @@ private:
     juce::TooltipWindow tooltips { nullptr, 600 };
     Content content { *this };
 
-    // En-tête
-    audiolab::MixKnob mixKnob;
-    juce::ComboBox presetBox;
-    std::unique_ptr<audiolab::PillButton> snaps[3];
-    audiolab::PillButton resetBtn, bypassBtn, themeBtn;
-    int armedSlot = -1, currentSlot = -1;
-    juce::uint32 armedAt = 0;
     std::unique_ptr<juce::ParameterAttachment> bypassAtt, listenAtt;
 
-    // Corps
     std::unique_ptr<audiolab::ArcKnob> kThr, kRatio, kKnee, kAtk, kRel, kMk;
     std::unique_ptr<audiolab::SliderRow> rowLook, rowScF, rowScQ;
     audiolab::SegButtons detectSeg { theme, { "Peak", "RMS" } };
