@@ -5,8 +5,7 @@
 
 class AudioLabCompEditor : public juce::AudioProcessorEditor,
                            private juce::AudioProcessorValueTreeState::Listener,
-                           private juce::AsyncUpdater,
-                           private juce::DarkModeSettingListener
+                           private juce::AsyncUpdater
 {
 public:
     explicit AudioLabCompEditor (AudioLabCompProcessor&);
@@ -15,7 +14,7 @@ public:
     void paint (juce::Graphics&) override {}
     void resized() override;
 
-    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md) : 580 × 362 replié, 580 × 504 déplié
+    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md, charte V2) : 580 × 362 replié, 580 × 504 déplié
     static constexpr int baseW = 580, baseH = 362, baseHOpen = 504;
 
 private:
@@ -31,9 +30,7 @@ private:
 
     void parameterChanged (const juce::String& id, float) override;
     void handleAsyncUpdate() override;
-    void applyTheme();
     void refreshState();
-    void darkModeSettingChanged() override { applyTheme(); }   // le thème suit celui du Mac / de Windows
     void setAdvanced (bool open, bool resizeWindow);
     int currentH() const { return advOpen ? baseHOpen : baseH; }
 
@@ -56,7 +53,7 @@ private:
     audiolab::Disclosure advBtn { theme, juce::String::fromUTF8 ("Réglages avancés") };
     audiolab::Toast toast { theme };
 
-    juce::Array<juce::Component*> body, advItems;
+    juce::Array<juce::Component*> advItems;
     bool bypassed = false, advOpen = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioLabCompEditor)

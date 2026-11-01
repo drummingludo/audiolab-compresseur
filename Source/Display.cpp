@@ -85,14 +85,14 @@ void CompDisplay::paint (Graphics& g)
     const auto& p = theme.pal();
     const float W = (float) getWidth(), H = (float) getHeight();
     Path bg; rr (bg, 0.5f, 0.5f, W - 1, H - 1, 10);
-    g.setColour (view == meters ? p.cv : p.cv2); g.fillPath (bg);
+    g.setColour (p.surface); g.fillPath (bg);   // écran « Surface » (charte V2)
     g.saveState();
     g.reduceClipRegion (bg);
     if (view == transfer) drawTransfer (g, W, H, cur);
     else if (view == activity) drawActivity (g, W, H, cur);
     else drawMeters (g, W, H, cur);
     g.restoreState();
-    g.setColour (p.grid); g.strokePath (bg, juce::PathStrokeType (1));
+    g.setColour (p.rail); g.strokePath (bg, juce::PathStrokeType (1));
 }
 
 // Barre de niveau horizontale (vue Vu-Mètres) : départ arrondi, bout mobile coupé droit
@@ -102,17 +102,18 @@ void CompDisplay::hBar (Graphics& g, const juce::String& key, float y, float nor
     const auto& p = theme.pal();
     const float x = 46, w = 170, h = 8;
     norm = juce::jlimit (0.0f, 1.0f, norm);
-    g.setColour (p.txt); g.setFont (theme.ui (10, 600));
+    g.setColour (p.soft); g.setFont (theme.ui (10, 600));
     g.drawText (label, Rectangle<float> (14, y - 3, 32, 14), juce::Justification::centredLeft, false);
     Path track; rr (track, x, y, w, h, 4);
-    g.setColour (p.cv2); g.fillPath (track);
+    g.setColour (p.bg); g.fillPath (track);
     g.saveState();
     g.reduceClipRegion (track);
+    // niveaux : teal secondaire → ambre (82 %) → rouge ; réduction de gain : orange
     if (gr) g.setColour (p.orange);
     else
     {
-        juce::ColourGradient grad (p.green, x, 0, p.red, x + w, 0, false);
-        grad.addColour (0.6, p.green); grad.addColour (0.82, p.yellow);
+        juce::ColourGradient grad (p.teal2, x, 0, p.redDark, x + w, 0, false);
+        grad.addColour (0.6, p.teal2); grad.addColour (0.82, p.orange);
         g.setGradientFill (grad);
     }
     g.fillRect (x, y, norm * w, h);
@@ -121,12 +122,12 @@ void CompDisplay::hBar (Graphics& g, const juce::String& key, float y, float nor
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (norm >= pk.v || now - pk.t > 1200) { pk.v = norm; pk.t = now; }
     else pk.v = std::max (norm, pk.v - 0.004f);
-    if (pk.v > 0.01f) { g.setColour (gr ? p.orange : (pk.v > 0.85f ? p.red : p.txt2)); g.fillRect (x + pk.v * w - 1, y, 2.0f, h); }
+    if (pk.v > 0.01f) { g.setColour (gr ? p.orange : (pk.v > 0.85f ? p.redDark : p.text2)); g.fillRect (x + pk.v * w - 1, y, 2.0f, h); }
     g.restoreState();
-    g.setColour (p.grid); g.strokePath (track, juce::PathStrokeType (1));
-    if (thrNorm >= 0) { g.setColour (p.accent); g.fillRect (x + thrNorm * w - 1, y - 4, 2.0f, h + 8); }
-    g.setColour (p.txt2); g.setFont (theme.mono (9));
-    g.drawText (value, Rectangle<float> (216, y - 3, 40, 14), juce::Justification::centredRight, false);
+    g.setColour (p.rail); g.strokePath (track, juce::PathStrokeType (1));
+    if (thrNorm >= 0) { g.setColour (p.teal); g.fillRect (x + thrNorm * w - 1, y - 4, 2.0f, h + 8); }
+    g.setColour (p.text2);
+    drawTabular (g, theme, value, 9, 400, Rectangle<float> (216, y - 3, 40, 14), juce::Justification::right);
 }
 
 // ── Vue Transfert : le graphe remplit tout le carré, chiffres à l'intérieur ──
@@ -138,18 +139,18 @@ void CompDisplay::drawTransfer (Graphics& g, float W, float H, const M& m)
     auto Y = [&] (double d) { return (float) (cY + cH - (d - lo) / (0 - lo) * cH); };
     const float thr = proc.getParam (params::thr), kn = proc.getParam (params::knee);
 
-    g.setColour (p.grid);
+    g.setColour (p.rail);
     for (int db = -48; db <= -12; db += 12)
     {
         g.drawLine (X (db), cY, X (db), cY + cH, 1); g.drawLine (cX, Y (db), cX + cW, Y (db), 1);
     }
     // knee + seuil
     const float hk = kn / 2;
-    g.setColour (A (p.accent, 0.07f)); g.fillRect (X (thr - hk), cY, X (thr + hk) - X (thr - hk), cH);
-    g.setColour (A (p.accent, 0.5f));
+    g.setColour (A (p.teal, 0.07f)); g.fillRect (X (thr - hk), cY, X (thr + hk) - X (thr - hk), cH);
+    g.setColour (p.teal);   // seuil en pointillés, opacité 100 % (charte : à 50 % il ne se voit plus)
     { Path l; l.startNewSubPath (X (thr), cY); l.lineTo (X (thr), cY + cH); dashedLine (g, l, 1, 4, 4); }
-    // diagonale 1:1
-    g.setColour (p.grid2);
+    // diagonale 1:1 (repère secondaire)
+    g.setColour (p.mark2);
     { Path l; l.startNewSubPath (X (lo), Y (lo)); l.lineTo (X (0), Y (0)); dashedLine (g, l, 1, 4, 4); }
     // courbe + remplissage
     Path c, fill;
@@ -161,9 +162,9 @@ void CompDisplay::drawTransfer (Graphics& g, float W, float H, const M& m)
         else { c.lineTo (cX + xi, y); fill.lineTo (cX + xi, y); }
     }
     fill.lineTo (cX + cW, cY + cH); fill.closeSubPath();
-    g.setGradientFill (juce::ColourGradient (A (p.accent, 0.25f), 0, cY, A (p.accent, 0.02f), 0, cY + cH, false));
+    g.setGradientFill (juce::ColourGradient (A (p.teal, 0.25f), 0, cY, A (p.teal, 0.02f), 0, cY + cH, false));
     g.fillPath (fill);
-    g.setColour (p.accent);
+    g.setColour (p.teal);
     g.strokePath (c, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     // point en direct + repères
     const double di = std::max ((double) lo, std::min (0.0, (double) m.in));
@@ -171,11 +172,11 @@ void CompDisplay::drawTransfer (Graphics& g, float W, float H, const M& m)
     const float dx = X (di), dyy = Y (dout);
     g.setColour (A (p.orange, 0.5f));
     { Path l; l.startNewSubPath (dx, cY + cH); l.lineTo (dx, dyy); l.lineTo (cX, dyy); dashedLine (g, l, 1, 3, 3); }
-    g.setColour (A (p.orange, 0.25f)); g.fillEllipse (dx - 9, dyy - 9, 18, 18);
-    g.setColour (p.orange); g.fillEllipse (dx - 5, dyy - 5, 10, 10);
-    g.setColour (juce::Colours::white); g.drawEllipse (dx - 5, dyy - 5, 10, 10, 1.5f);
+    g.setColour (A (p.orange, 0.25f)); g.fillEllipse (dx - 9.6f, dyy - 9.6f, 19.2f, 19.2f);
+    g.setColour (p.orange); g.fillEllipse (dx - 5.9f, dyy - 5.9f, 11.8f, 11.8f);
+    g.setColour (p.bg); g.drawEllipse (dx - 5.9f, dyy - 5.9f, 11.8f, 11.8f, 1.5f);
     // chiffres à l'intérieur, en petit : sortie le long du bord gauche, entrée le long du bord bas
-    g.setColour (p.txt); g.setFont (theme.mono (8));
+    g.setColour (p.soft); g.setFont (theme.ui (8));
     for (int db = 0; db >= -48; db -= 12)
     {
         const float base = db == 0 ? 12.0f : Y (db) - 3;
@@ -197,7 +198,7 @@ void CompDisplay::drawActivity (Graphics& g, float W, float H, const M&)
     auto xAt = [&] (int i) { return aX + aW - (float) (n - 1 - i); };
     const float mid = H / 2, amp = H * 0.47f;
     auto dbToV = [] (float db) { return juce::jlimit (0.0f, 1.0f, (std::max (-60.0f, db) + 60) / 60); };
-    g.setColour (p.grid);
+    g.setColour (p.rail);
     for (float d : { -12.0f, -24.0f, -36.0f })
     {
         const float v = dbToV (d);
@@ -213,83 +214,21 @@ void CompDisplay::drawActivity (Graphics& g, float W, float H, const M&)
         g.setColour (fillC); g.fillPath (w);
         g.setColour (strokeC); g.strokePath (w, juce::PathStrokeType (1));
     };
-    wave (actIn, A (p.txt, 0.18f), A (p.txt, 0.5f));
-    wave (actOut, A (p.accent, 0.35f), A (p.accent, 0.9f));
+    wave (actIn, A (p.soft, 0.18f), A (p.soft, 0.5f));
+    wave (actOut, A (p.teal, 0.35f), A (p.teal, 0.9f));
     const float tv = dbToV (proc.getParam (params::thr));
-    g.setColour (p.accent);
+    g.setColour (p.teal);
     { Path l; l.startNewSubPath (aX, mid - tv * amp); l.lineTo (aX + aW, mid - tv * amp); dashedLine (g, l, 1.2f, 6, 4); }
     { Path l; l.startNewSubPath (aX, mid + tv * amp); l.lineTo (aX + aW, mid + tv * amp); dashedLine (g, l, 1.2f, 6, 4); }
 }
 
-// ── Vue Vu-Mètres : VU à aiguille sur une face encastrée + barres In / GR / Out ──
+// ── Vue Vu-Mètres : cadran VU clair rétroéclairé (charte V2) + barres In / GR / Out ──
 void CompDisplay::drawMeters (Graphics& g, float W, float, const M& m)
 {
-    const auto& p = theme.pal();
-    const Rectangle<float> face (14, 14, W - 28, 172);
-    Path panel; panel.addRoundedRectangle (face, 8);
-    g.setColour (p.cv2); g.fillPath (panel);
-    g.saveState();
-    g.reduceClipRegion (panel);
-    {
-        // ombre intérieure : décalée de 4 px vers le bas, flou ≈ 5,5 px, opacité 50 %
-        Path frame; frame.addRectangle (face.expanded (40)); frame.addRoundedRectangle (face, 8);
-        frame.setUsingNonZeroWinding (false);
-        juce::DropShadow (juce::Colours::black.withAlpha (0.5f), 11, { 0, 4 }).drawForPath (g, frame);
-    }
-    needleVU (g, face.getX(), face.getY(), face.getWidth(), 147);
-    g.restoreState();
+    drawVuDial (g, theme, Rectangle<float> (14, 14, W - 28, 172), vuPos, "GAIN REDUCTION", {}, lampOff);
     const float thr = proc.getParam (params::thr);
     hBar (g, "in", 200, (m.in + 60) / 60, false, "In", juce::String (m.in, 1), (thr + 60) / 60);
     hBar (g, "gr", 222, m.gr / 24, true, "GR", "-" + juce::String (m.gr, 1));
     hBar (g, "out", 244, (m.out + 60) / 60, false, "Out", juce::String (m.out, 1));
-}
-
-void CompDisplay::needleVU (Graphics& g, float x, float y, float w, float h)
-{
-    const auto& p = theme.pal();
-    const float s = std::min (w / 330.0f, h / 200.0f), ox = x + (w - 330 * s) / 2, oy = y + (h - 200 * s) / 2;
-    g.saveState();
-    g.addTransform (juce::AffineTransform::scale (s).translated (ox, oy));
-    const float cx = 165, cy = 215, R = 150;
-    static const float pts[][2] = { { -20, 0 }, { -10, .2f }, { -7, .32f }, { -5, .44f }, { -3, .57f }, { -2, .64f }, { -1, .71f }, { 0, .78f }, { 1, .855f }, { 2, .93f }, { 3, 1 } };
-    auto pos = [&] (double vu) -> float
-    {
-        if (vu <= -20) return 0;
-        if (vu >= 3) return 1;
-        for (int i = 1; i < 11; ++i)
-            if (vu <= pts[i][0]) { const float a = pts[i - 1][0], pa = pts[i - 1][1], b = pts[i][0], pb = pts[i][1]; return (float) (pa + (pb - pa) * (vu - a) / (b - a)); }
-        return 1;
-    };
-    auto ang = [] (float t) { return (-48 + 96 * t) * juce::MathConstants<float>::pi / 180; };
-    auto P = [&] (float t, float r) { return juce::Point<float> (cx + std::sin (ang (t)) * r, cy - std::cos (ang (t)) * r); };
-    { Path a; a.addCentredArc (cx, cy, R, R, 0, ang (0), ang (pos (0)), true); g.setColour (p.txt2); g.strokePath (a, juce::PathStrokeType (2)); }
-    { Path a; a.addCentredArc (cx, cy, R, R, 0, ang (pos (0)), ang (1), true); g.setColour (p.red); g.strokePath (a, juce::PathStrokeType (4)); }
-    g.setFont (theme.ui (11, 600));
-    for (auto& q : pts)
-    {
-        const float vu = q[0], t = pos (vu);
-        const auto p1 = P (t, R - 1), p2 = P (t, R - 10), tp = P (t, R + 13);
-        g.setColour (vu > 0 ? p.red : p.txt2); g.drawLine (p1.x, p1.y, p2.x, p2.y, 1.5f);
-        g.setColour (vu > 0 ? p.red : p.txt);
-        const juce::String lab = (int) vu == 0 ? "0" : (vu > 0 ? "+" + juce::String ((int) vu) : juce::String ((int) vu));
-        g.drawText (lab, Rectangle<float> (tp.x - 15, tp.y - 7, 30, 14), juce::Justification::centred, false);
-    }
-    for (int vu = -20; vu <= 3; ++vu)
-    {
-        bool major = false; for (auto& q : pts) if ((int) q[0] == vu) major = true;
-        if (major) continue;
-        const float t = pos (vu); const auto p1 = P (t, R - 1), p2 = P (t, R - 6);
-        g.setColour (p.txt); g.drawLine (p1.x, p1.y, p2.x, p2.y, 1);
-    }
-    g.setColour (p.txt2); g.setFont (theme.ui (20, 700));
-    g.drawText ("VU", Rectangle<float> (cx - 40, 120, 80, 24), juce::Justification::centred, false);
-    g.setColour (p.txt); g.setFont (theme.ui (10, 600));
-    g.drawText ("GAIN REDUCTION", Rectangle<float> (cx - 80, 145, 160, 14), juce::Justification::centred, false);
-    const float a = ang (pos (vuPos));
-    g.setColour (p.accent);
-    Path needle; needle.startNewSubPath (cx, cy); needle.lineTo (cx + std::sin (a) * (R + 4), cy - std::cos (a) * (R + 4));
-    g.strokePath (needle, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour (p.txt2); g.fillEllipse (cx - 14, cy - 14, 28, 28);
-    g.restoreState();
 }
 } // namespace audiolab

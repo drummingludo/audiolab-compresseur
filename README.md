@@ -3,7 +3,7 @@
 Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en plugin **VST3 / AU** pour Logic Pro, Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig…, et **AAX** pour Pro Tools (version de test non signée, voir plus bas).
 
 - **Même son que l'outil web** : le moteur est un portage ligne à ligne du processeur `al-comp` d'`Audio_Lab.html`. Le banc de test compare les deux versions : sortie identique au bit près à 44,1 / 48 / 96 kHz.
-- **Même interface** : potentiomètres à arc, vues Transfert / Activité / Mètres (VU à aiguille), presets pédagogiques avec ce qu'il faut entendre, snapshots A/B/C, Dry/Wet, Bypass, thème clair / sombre, fenêtre redimensionnable.
+- **Interface à la charte Transversal (V2)** : potentiomètres à arc, écran Transfert / Activité / Vu-Mètres (VU à cadran clair rétroéclairé), réglages avancés repliables, thème sombre, police Poppins, fenêtre redimensionnable. Dry/Wet et Bypass depuis le logiciel hôte.
 - Réglages : Threshold, Ratio (jusqu'à ∞:1), Knee, Attack (0,1–200 ms), Release (10–1000 ms), Makeup, Lookahead (0–10 ms, latence compensée), détection Peak / RMS, filtre de side-chain (HPF, LPF, cloche +6 dB) avec écoute du side-chain.
 
 ## Télécharger
@@ -38,6 +38,6 @@ python3 tests/verify_dsp.py     # moteur C++ ↔ code web d'Audio Lab (Node.js r
 
 ## Licence
 
-Code sous **GNU AGPLv3** (voir `LICENSE`), comme la version libre du framework [JUCE](https://juce.com) qu'il utilise. Police Inter sous licence SIL OFL 1.1 (`Resources/Inter-OFL-LICENSE.txt`).
+Code sous **GNU AGPLv3** (voir `LICENSE`), comme la version libre du framework [JUCE](https://juce.com) qu'il utilise. Police Poppins sous licence SIL OFL 1.1 (`Resources/Poppins-OFL-LICENSE.txt`).
 
 © Transversal Studio — Ludovic Diaz

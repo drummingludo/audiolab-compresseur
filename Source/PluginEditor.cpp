@@ -27,7 +27,7 @@ static void headphonesIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::C
 
 AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
-      listenBtn (theme, PillButton::Style::ibtn, U ("Écouter")),
+      listenBtn (theme, U ("Écouter")),
       display (theme, p)
 {
     setLookAndFeel (&lnf);
@@ -35,30 +35,28 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     addAndMakeVisible (content);
     auto& ap = proc.apvts;
     auto prm = [&] (const char* id) -> juce::RangedAudioParameter& { return *ap.getParameter (id); };
-    auto acc = [] (const Pal& q) { return q.accent; };
-    auto ora = [] (const Pal& q) { return q.orange; };
-    auto grn = [] (const Pal& q) { return q.green; };
     auto i0 = [] (float v) { return String (juce::roundToInt (v)); };
 
-    kThr = std::make_unique<ArcKnob> (theme, prm (params::thr), "Threshold", "dB", acc, ArcKnob::Size::md, i0, 0.0f, U (helpThr));
-    kRatio = std::make_unique<ArcKnob> (theme, prm (params::ratio), "Ratio", ":1", acc, ArcKnob::Size::md,
+    // Charte V2 : seuil, ratio, knee = teal ; temps = orange ; gain (Make-up) et filtre side-chain = teal secondaire
+    kThr = std::make_unique<ArcKnob> (theme, prm (params::thr), "Threshold", "dB", Family::teal, ArcKnob::Size::md, i0, 0.0f, U (helpThr));
+    kRatio = std::make_unique<ArcKnob> (theme, prm (params::ratio), "Ratio", ":1", Family::teal, ArcKnob::Size::md,
         [] (float v) { return v >= 20 ? U ("∞") : (std::fmod (v, 1.0f) > 0 ? String (v, 1) : String ((int) v)); }, 1.0f, U (helpRat));
-    kAtk = std::make_unique<ArcKnob> (theme, prm (params::attack), "Attack", "ms", ora, ArcKnob::Size::md,
+    kAtk = std::make_unique<ArcKnob> (theme, prm (params::attack), "Attack", "ms", Family::orange, ArcKnob::Size::md,
         [] (float v) { return v < 10 ? String (v, 1) : String (juce::roundToInt (v)); }, 0.1f, U (helpAtk));
-    kRel = std::make_unique<ArcKnob> (theme, prm (params::release), "Release", "ms", ora, ArcKnob::Size::md, i0, 10.0f, U (helpRel));
-    kMk = std::make_unique<ArcKnob> (theme, prm (params::makeup), "Makeup", "dB", grn, ArcKnob::Size::xs,
+    kRel = std::make_unique<ArcKnob> (theme, prm (params::release), "Release", "ms", Family::orange, ArcKnob::Size::md, i0, 10.0f, U (helpRel));
+    kMk = std::make_unique<ArcKnob> (theme, prm (params::makeup), "Makeup", "dB", Family::teal2, ArcKnob::Size::xs,
         [] (float v) { return "+" + String (juce::roundToInt (v)); }, 0.0f, U (helpMk));
 
-    rowKnee = std::make_unique<SliderRow> (theme, prm (params::knee), "Knee", [] (float v) { return String (juce::roundToInt (v)) + " dB"; });
+    rowKnee = std::make_unique<SliderRow> (theme, prm (params::knee), "Knee", Family::teal, [] (float v) { return String (juce::roundToInt (v)) + " dB"; });
     rowKnee->setTooltip (U (helpKn));
-    rowLook = std::make_unique<SliderRow> (theme, prm (params::look), "Lookahead", [] (float v) { return String (v, 1) + " ms"; });
+    rowLook = std::make_unique<SliderRow> (theme, prm (params::look), "Lookahead", Family::orange, [] (float v) { return String (v, 1) + " ms"; });
     rowLook->setTooltip (U (helpLook));
-    rowScF = std::make_unique<SliderRow> (theme, prm (params::scFreq), "SC Freq", [] (float v) { return params::fmtHz (v); });
-    rowScQ = std::make_unique<SliderRow> (theme, prm (params::scQ), "SC Q", [] (float v) { return String (v, 1); });
+    rowScF = std::make_unique<SliderRow> (theme, prm (params::scFreq), "SC Freq", Family::teal2, [] (float v) { return params::fmtHz (v); });
+    rowScQ = std::make_unique<SliderRow> (theme, prm (params::scQ), "SC Q", Family::teal2, [] (float v) { return String (v, 1); });
 
-    detectSeg.onPanel = true; detectSeg.gap = 2; detectSeg.padX = 12;
+    detectSeg.onSurface = true;
     detectSeg.attach (prm (params::detect));
-    viewSeg.equalWidths = true; viewSeg.fontSize = 11; viewSeg.gap = 2;
+    viewSeg.fontSize = 10;   // sélecteur de l'écran : 10 px (charte § 5)
     scBox.addItemList ({ "Off", "HPF", "LPF", "Bell +6" }, 1);
     scBox.setTitle ("Side-chain");
     scBox.setTooltip (U ("Filtre du détecteur : le compresseur réagit seulement à la partie du spectre choisie."));
@@ -79,24 +77,21 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
 
     bypassAtt = std::make_unique<juce::ParameterAttachment> (prm (params::bypass), [this] (float v) {
         bypassed = v > 0.5f; refreshState(); }, nullptr);
-    bypassAtt->sendInitialUpdate();   // Bypass du logiciel : la fenêtre s'estompe
+    bypassAtt->sendInitialUpdate();   // Bypass du logiciel : la lampe du VU s'éteint
     viewSeg.onSelect = [this] (int v) { display.setView (v); proc.ui.setProperty ("view", v, nullptr); };
     advBtn.setTooltip (U ("Afficher / masquer Knee, Lookahead, Détection et Side-chain"));
     advBtn.onClick = [this] { setAdvanced (! advOpen, true); };
 
     advItems = { rowKnee.get(), rowLook.get(), &detectSeg, &scBox, &listenBtn, rowScF.get(), rowScQ.get() };
-    body = { kThr.get(), kRatio.get(), kAtk.get(), kRel.get(), kMk.get(), &display, &viewSeg, &advBtn };
-    body.addArray (advItems);
-    for (auto* c : body) content.addAndMakeVisible (c);
+    for (auto* c : std::initializer_list<juce::Component*> { kThr.get(), kRatio.get(), kAtk.get(), kRel.get(), kMk.get(), &display, &viewSeg, &advBtn })
+        content.addAndMakeVisible (c);
+    for (auto* c : advItems) content.addAndMakeVisible (c);
     content.addAndMakeVisible (toast);
 
     for (auto* id : { params::scType }) ap.addParameterListener (id, this);
-    juce::Desktop::getInstance().addDarkModeSettingListener (this);
-
     const int v = (int) proc.ui.getProperty ("view", 0);
     viewSeg.setSelected (v); display.setView (v);
 
-    applyTheme();
     const double sc = juce::jlimit (0.6, 2.0, (double) proc.ui.getProperty ("scale", 1.0));   // lu avant que les limites ne redimensionnent
     setAdvanced ((bool) proc.ui.getProperty ("adv", false), false);   // panneau avancé caché par défaut
     setResizable (true, true);
@@ -109,7 +104,6 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
 AudioLabCompEditor::~AudioLabCompEditor()
 {
     proc.apvts.removeParameterListener (params::scType, this);
-    juce::Desktop::getInstance().removeDarkModeSettingListener (this);
     cancelPendingUpdate();
     tooltips.setLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
@@ -135,24 +129,11 @@ void AudioLabCompEditor::setAdvanced (bool open, bool resizeWindow)
 }
 void AudioLabCompEditor::handleAsyncUpdate() { refreshState(); }
 
-void AudioLabCompEditor::applyTheme()
-{
-    // Clair / sombre selon le réglage de l'ordinateur (« themeOverride » sert seulement aux tests)
-    const String t = proc.ui.getProperty ("themeOverride", "auto").toString();
-    const bool dark = t == "dark" || (t != "light" && juce::Desktop::getInstance().isDarkModeActive());
-    theme.setDark (dark);
-    lnf.refresh();
-    sendLookAndFeelChange();   // les menus déroulants reprennent les couleurs du thème
-    content.repaint();
-    for (auto* c : content.getChildren()) c->repaint();
-}
-
 void AudioLabCompEditor::refreshState()
 {
     const bool scOff = proc.getParam (params::scType) < 0.5f;
     rowScF->setDimmed (scOff); rowScQ->setDimmed (scOff);
-    for (auto* c : body) { c->setAlpha (bypassed ? 0.35f : 1.0f); c->setEnabled (! bypassed); }
-    content.repaint();
+    display.setLampOff (bypassed);   // charte V2 : en bypass, la lampe du VU s'éteint ; les réglages restent accessibles
 }
 
 void AudioLabCompEditor::resized()
@@ -166,14 +147,13 @@ void AudioLabCompEditor::resized()
 void AudioLabCompEditor::Content::paint (juce::Graphics& g)
 {
     const auto& p = ed.theme.pal();
-    g.fillAll (p.bg2);
+    g.fillAll (p.bg);
     if (! ed.advOpen) return;
-    // panneau des réglages avancés + libellés des lignes Détection / Side-chain
-    const float a = ed.bypassed ? 0.35f : 1.0f;
-    g.setColour (p.bg3.withMultipliedAlpha (a)); g.fillRoundedRectangle (24, 354, 532, 126, 12);
-    g.setColour (p.dim.withMultipliedAlpha (a)); g.setFont (ed.theme.ui (12));
-    g.drawText (U ("Détection"), juce::Rectangle<float> (40, 438, 64, 26), juce::Justification::centredLeft, false);
-    g.drawText (U ("Side‑chain"), juce::Rectangle<float> (306, 370, 64, 26), juce::Justification::centredLeft, false);
+    // panneau des réglages avancés (« Surface », coins 12) + libellés des lignes Détection / Side-chain
+    g.setColour (p.surface); g.fillRoundedRectangle (24, 354, 532, 126, 12);
+    g.setColour (p.text2); g.setFont (ed.theme.ui (12));
+    g.drawText (U ("Détection"), juce::Rectangle<float> (40, 438, 68, 26), juce::Justification::centredLeft, false);
+    g.drawText ("Side-chain", juce::Rectangle<float> (306, 370, 68, 26), juce::Justification::centredLeft, false);   // trait d'union normal (Poppins)
 }
 
 // Grille de 24 px (voir docs/06_GUI_Plugin_Compresseur.md)
@@ -196,10 +176,10 @@ void AudioLabCompEditor::Content::resized()
     const int L = 40, R = 306, cw = 234, y0 = 370, y1 = 404, y2 = 438;
     e.rowKnee->setBounds (L, y0, cw, 26);
     e.rowLook->setBounds (L, y1, cw, 26);
-    e.detectSeg.setBounds (L + 74, y2, juce::roundToInt (e.detectSeg.idealWidth()), 26);
-    e.scBox.setBounds (R + 74, y0, 66, 26);
+    e.detectSeg.setBounds (L + 78, y2, juce::roundToInt (e.detectSeg.idealWidth()), 26);
+    e.scBox.setBounds (R + 78, y0, 60, 26);
     const int lw = juce::roundToInt (e.listenBtn.idealWidth());
-    e.listenBtn.setBounds (R + cw - lw, y0, lw, 26);
+    e.listenBtn.setBounds (R + 78 + 60 + 10, y0, lw, 26);
     e.rowScF->setBounds (R, y1, cw, 26);
     e.rowScQ->setBounds (R, y2, cw, 26);
     e.toast.setBounds (getLocalBounds());

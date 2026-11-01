@@ -2,6 +2,7 @@
 #pragma once
 #include "PluginProcessor.h"
 #include "Theme.h"
+#include "VuMeter.h"
 #include <map>
 
 namespace audiolab
@@ -15,6 +16,7 @@ public:
     enum View { transfer = 0, activity = 1, meters = 2 };
     void setView (int v);
     int getView() const { return view; }
+    void setLampOff (bool off) { if (off != lampOff) { lampOff = off; repaint(); } }   // bypass : lampe du VU éteinte
 
     void paint (juce::Graphics&) override;
 
@@ -26,12 +28,12 @@ private:
     void drawMeters (juce::Graphics&, float W, float H, const M&);
     void hBar (juce::Graphics&, const juce::String& key, float y, float norm, bool gr,
                const juce::String& label, const juce::String& value, float thrNorm = -1);
-    void needleVU (juce::Graphics&, float x, float y, float w, float h);
     double curve (double di) const;
 
     Theme& theme;
     AudioLabCompProcessor& proc;
     int view = transfer;
+    bool lampOff = false;
     float smIn = -80, smGR = 0, smOut = -80;
     std::vector<float> actIn, actOut, actGR;
     struct Peak { float v = 0; double t = 0; };
