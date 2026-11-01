@@ -71,7 +71,7 @@ Fond « Surface » #2A2B29, bord 1 px #3E3F3D, coins 10. Le contenu est découp�
 - **Cadran VU** : x 14, y 14, 242 × 172, coins 8, **cadran clair #F9F9FB rétroéclairé** encastré (ombre intérieure : décalage 4 px vers le bas, flou 5,5, 50 %) ; halo de lampe ambre #EAA93D sous le pivot (34 % → 12 % → 0), **éteint en bypass** ; bords assombris (0 → 9 %) ; reflet de verre diagonal (blanc 85 % → 18 %, coupé net) qui ne touche pas les chiffres.
 - VU à aiguille de réduction de gain : graduations −20 … +3 (grandes #1D1E1C, petites #969697, chiffres #686868), zone rouge #9B2226 au-dessus de 0, « VU » (gras) et « GAIN REDUCTION » (semi-gras, #686868). Aiguille #1D1E1C de 1,6 px avec ombre portée, pivot en relief visible en bas du cadran. **Balistique VU normalisée : 99 % en 300 ms, dépassement ≈ 1,3 %.**
 - Dessous, 3 barres horizontales **In / GR / Out** : piste 170 × 8 (x 46 ; y 200, 222, 244), coins 4, fond #1D1E1C, bord #3E3F3D. Nom à gauche (10 px semi-gras, #A5A6A6), valeur à droite (9 px #C9C9CA, chiffres en cellules fixes).
-  - In / Out : dégradé teal secondaire #79AFB0 → ambre #EAA93D (82 %) → rouge #BC6D71. GR : orange #EAA93D. Repère de seuil teal #0A9396 sur In.
+  - In / Out : dégradé teal secondaire #79AFB0 → ambre #EAA93D (82 %) → rouge #BC6D71, de gauche à droite. **GR : orange #EAA93D, part de la droite (0 dB) et s'allonge vers la gauche**, dans le même sens que l'aiguille du VU (demande de Ludovic, 01/11). Repère de seuil teal #0A9396 sur In.
   - **Bout mobile coupé droit**, départ arrondi.
 
 ## 6. Panneau « Réglages avancés » (caché par défaut)

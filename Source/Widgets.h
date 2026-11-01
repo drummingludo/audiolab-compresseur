@@ -48,6 +48,8 @@ public:
 
     juce::String hint;                               // petite aide sous le nom (gros bouton)
     std::function<juce::String (float)> subFn;       // 2ᵉ ligne du capuchon à la place de l'unité (ex. « 50 ms »)
+    float dragPixels = 220;                          // course de souris pour toute la plage (plus grand = plus précis)
+    float wheelStep = 0.01f;                         // pas de la molette (fraction de la plage)
 
     ArcKnob (Theme& t, juce::RangedAudioParameter& prm, juce::String label, juce::String unit, Family family,
              Size size, std::function<juce::String (float)> format, float zeroValue, juce::String help = {})
@@ -171,7 +173,7 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (! dragging) return;
-        const float kk = e.mods.isShiftDown() ? 1200.0f : 220.0f;   // Maj = réglage fin
+        const float kk = dragPixels * (e.mods.isShiftDown() ? 5.5f : 1.0f);   // Maj = réglage fin
         setNorm (v0 + (y0 - e.position.y) / kk, true);
     }
     void mouseUp (const juce::MouseEvent&) override { if (dragging) { attachment.endGesture(); dragging = false; repaint(); } }
@@ -182,7 +184,7 @@ public:
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
     {
         if (std::abs (w.deltaY) < 1e-6f || ! isEnabled()) return;
-        setNorm (param.getValue() + (w.deltaY > 0 ? 0.01f : -0.01f), false);
+        setNorm (param.getValue() + (w.deltaY > 0 ? wheelStep : -wheelStep), false);
     }
     bool keyPressed (const juce::KeyPress& kp) override
     {

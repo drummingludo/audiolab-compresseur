@@ -38,9 +38,12 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     auto i0 = [] (float v) { return String (juce::roundToInt (v)); };
 
     // Charte V2 : seuil, ratio, knee = teal ; temps = orange ; gain (Make-up) et filtre side-chain = teal secondaire
-    kThr = std::make_unique<ArcKnob> (theme, prm (params::thr), "Threshold", "dB", Family::teal, ArcKnob::Size::md, i0, 0.0f, U (helpThr));
+    kThr = std::make_unique<ArcKnob> (theme, prm (params::thr), "Threshold", "dB", Family::teal, ArcKnob::Size::md,
+        [] (float v) { return String (v, 1); }, 0.0f, U (helpThr));
     kRatio = std::make_unique<ArcKnob> (theme, prm (params::ratio), "Ratio", ":1", Family::teal, ArcKnob::Size::md,
-        [] (float v) { return v >= 20 ? U ("∞") : (std::fmod (v, 1.0f) > 0 ? String (v, 1) : String ((int) v)); }, 1.0f, U (helpRat));
+        [] (float v) { return v >= 20 ? U ("∞") : params::fmtRatio (v); }, 1.0f, U (helpRat));
+    // réglage plus précis du seuil et du ratio : course de souris plus longue, molette plus fine
+    for (auto* k : { kThr.get(), kRatio.get() }) { k->dragPixels = 500; k->wheelStep = 0.004f; }
     kAtk = std::make_unique<ArcKnob> (theme, prm (params::attack), "Attack", "ms", Family::orange, ArcKnob::Size::md,
         [] (float v) { return v < 10 ? String (v, 1) : String (juce::roundToInt (v)); }, 0.1f, U (helpAtk));
     kRel = std::make_unique<ArcKnob> (theme, prm (params::release), "Release", "ms", Family::orange, ArcKnob::Size::md, i0, 10.0f, U (helpRel));

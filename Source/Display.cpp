@@ -95,7 +95,7 @@ void CompDisplay::paint (Graphics& g)
     g.setColour (p.rail); g.strokePath (bg, juce::PathStrokeType (1));
 }
 
-// Barre de niveau horizontale (vue Vu-Mètres) : départ arrondi, bout mobile coupé droit
+// Barre de niveau horizontale (vue Vu-Mètres) : départ arrondi, bout mobile coupé droit ; la barre GR part de la droite
 void CompDisplay::hBar (Graphics& g, const juce::String& key, float y, float norm, bool gr,
                         const juce::String& label, const juce::String& value, float thrNorm)
 {
@@ -116,13 +116,15 @@ void CompDisplay::hBar (Graphics& g, const juce::String& key, float y, float nor
         grad.addColour (0.6, p.teal2); grad.addColour (0.82, p.orange);
         g.setGradientFill (grad);
     }
-    g.fillRect (x, y, norm * w, h);
+    // niveaux : de gauche à droite ; réduction de gain : part de la droite (0 dB) et descend vers la gauche, comme l'aiguille du VU
+    if (gr) g.fillRect (x + (1 - norm) * w, y, norm * w, h);
+    else g.fillRect (x, y, norm * w, h);
     // maintien de crête (petit trait)
     auto& pk = peaks[key];
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (norm >= pk.v || now - pk.t > 1200) { pk.v = norm; pk.t = now; }
     else pk.v = std::max (norm, pk.v - 0.004f);
-    if (pk.v > 0.01f) { g.setColour (gr ? p.orange : (pk.v > 0.85f ? p.redDark : p.text2)); g.fillRect (x + pk.v * w - 1, y, 2.0f, h); }
+    if (pk.v > 0.01f) { g.setColour (gr ? p.orange : (pk.v > 0.85f ? p.redDark : p.text2)); g.fillRect (x + (gr ? 1 - pk.v : pk.v) * w - 1, y, 2.0f, h); }
     g.restoreState();
     g.setColour (p.rail); g.strokePath (track, juce::PathStrokeType (1));
     if (thrNorm >= 0) { g.setColour (p.teal); g.fillRect (x + thrNorm * w - 1, y - 4, 2.0f, h + 8); }

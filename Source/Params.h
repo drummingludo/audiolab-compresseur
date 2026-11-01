@@ -51,6 +51,7 @@ inline juce::NormalisableRange<float> freqRange()
              [] (float, float, float v) { return juce::jlimit (20.0f, 20000.0f, std::round (v)); } };
 }
 
+inline juce::String fmtRatio (float v) { return std::abs (v - std::round (v)) < 0.05f ? juce::String (juce::roundToInt (v)) : juce::String (v, 1); }
 inline juce::String fmtHz (float f) { return f >= 1000 ? juce::String (f / 1000.0f, 1) + " k" : juce::String (juce::roundToInt (f)) + " Hz"; }
 
 inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
@@ -63,8 +64,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, r, def,
                    AudioParameterFloatAttributes().withLabel (unit).withStringFromValueFunction (std::move (toText))));
     };
-    fl (thr, "Threshold", linRange (-60, 0, 1), 0, "dB", [] (float v, int) { return String (roundToInt (v)) + " dB"; });
-    fl (ratio, "Ratio", logRange (1, 20, 0.5f), 1, ":1", [] (float v, int) { return v >= 20 ? String (CharPointer_UTF8 ("\xe2\x88\x9e:1")) : String (v, std::fmod (v, 1.0f) > 0 ? 1 : 0) + ":1"; });
+    // Threshold au 1/10 de dB et Ratio au 1/10 (plus fins que dans Audio Lab web : 1 dB et 0,5)
+    fl (thr, "Threshold", linRange (-60, 0, 0.1f), 0, "dB", [] (float v, int) { return String (v, 1) + " dB"; });
+    fl (ratio, "Ratio", logRange (1, 20, 0.1f), 1, ":1", [] (float v, int) { return v >= 20 ? String (CharPointer_UTF8 ("\xe2\x88\x9e:1")) : fmtRatio (v) + ":1"; });
     fl (knee, "Knee", linRange (0, 20, 1), 0, "dB", [] (float v, int) { return String (roundToInt (v)) + " dB"; });
     fl (attack, "Attack", logRange (0.1f, 200, 0.1f), 0.1f, "ms", [] (float v, int) { return (v < 10 ? String (v, 1) : String (roundToInt (v))) + " ms"; });
     fl (release, "Release", logRange (10, 1000, 1), 10, "ms", [] (float v, int) { return String (roundToInt (v)) + " ms"; });
