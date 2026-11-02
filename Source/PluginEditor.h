@@ -49,8 +49,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> scAtt;
     audiolab::PillButton listenBtn;
     audiolab::CompDisplay display;
-    audiolab::SegButtons viewSeg { theme, { "Transfert", juce::String::fromUTF8 ("Activité"), juce::String::fromUTF8 ("Vu-Mètres") } };
-    audiolab::Disclosure advBtn { theme, juce::String::fromUTF8 ("Réglages avancés") };
+    audiolab::SegButtons viewSeg { theme, { "Transfer", "Activity", "Meters" } };
+    audiolab::Disclosure advBtn { theme, "Advanced settings" };
     audiolab::Toast toast { theme };
 
     juce::Array<juce::Component*> advItems;

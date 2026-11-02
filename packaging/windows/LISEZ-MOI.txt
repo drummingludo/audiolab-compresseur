@@ -1,17 +1,17 @@
-AUDIO LAB COMPRESSEUR - Windows (VST3, 64 bits)
+AUDIO LAB COMPRESSOR - Windows (VST3, 64 bits)
 Transversal Studio - Audio Lab "Chimiste du son"
 
 INSTALLATION
-1. Copiez le dossier "Audio Lab Compresseur.vst3" dans :
+1. Copiez le dossier "Audio Lab Compressor.vst3" dans :
    C:\Program Files\Common Files\VST3
    (Windows demande une autorisation administrateur : acceptez.)
 2. Relancez votre logiciel de musique et lancez une recherche de plugins si besoin.
 
-Le plugin apparait sous le nom "Audio Lab Compresseur" (fabricant : Transversal Studio)
+Le plugin apparait sous le nom "Lab Comp" (fabricant : Transversal Studio)
 dans Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig...
 
 PRO TOOLS (format AAX) - VERSION DE TEST
-Le dossier "Pro Tools (AAX non signe)" contient Audio Lab Compresseur.aaxplugin.
+Le dossier "Pro Tools (AAX non signe)" contient Audio Lab Compressor.aaxplugin.
 Il n'a pas encore la signature numerique PACE exigee par Pro Tools : il se charge
 uniquement dans Pro Tools Developer (version de test reservee aux developpeurs Avid),
 installe dans C:\Program Files\Common Files\Avid\Audio\Plug-Ins

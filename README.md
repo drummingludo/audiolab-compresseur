@@ -1,4 +1,4 @@
-# Audio Lab Compresseur
+# Audio Lab Compressor
 
 Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en plugin **VST3 / AU** pour Logic Pro, Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig…, et **AAX** pour Pro Tools (version de test non signée, voir plus bas).
 
@@ -9,15 +9,15 @@ Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en pl
 ## Télécharger
 
 Chaque fabrication produit deux archives (onglet **Actions** > dernière fabrication > *Artifacts*) :
-- `AudioLabCompresseur-Mac.zip` : VST3 + AU, Apple Silicon et Intel, avec un installateur en un double-clic.
-- `AudioLabCompresseur-Windows.zip` : VST3 64 bits.
+- `AudioLabCompressor-Mac.zip` : VST3 + AU, Apple Silicon et Intel, avec un installateur en un double-clic.
+- `AudioLabCompressor-Windows.zip` : VST3 64 bits.
 
 Pour une version durable sur la page **Releases**, créer un tag `v…` : la fabrication y dépose alors les deux archives.
 Mode d'emploi : fichier `LISEZ-MOI.txt` dans chaque archive.
 
 ### Pro Tools (AAX)
 
-Chaque archive contient aussi `Audio Lab Compresseur.aaxplugin` (Mac universel, Windows 64 bits), fabriqué avec le SDK AAX fourni par JUCE (GPL v3). Il n'est **pas encore signé** par PACE : il ne se charge que dans **Pro Tools Developer**. Particularité AAX : la latence annoncée est fixe (10 ms, lookahead maximal), comme l'exige Pro Tools ; un retard interne complète le lookahead choisi, le son est identique à l'échantillon près au VST3 décalé.
+Chaque archive contient aussi `Audio Lab Compressor.aaxplugin` (Mac universel, Windows 64 bits), fabriqué avec le SDK AAX fourni par JUCE (GPL v3). Il n'est **pas encore signé** par PACE : il ne se charge que dans **Pro Tools Developer**. Particularité AAX : la latence annoncée est fixe (10 ms, lookahead maximal), comme l'exige Pro Tools ; un retard interne complète le lookahead choisi, le son est identique à l'échantillon près au VST3 décalé.
 
 ## Fabrication
 

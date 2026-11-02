@@ -76,7 +76,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { scType, 1 }, "Side-chain", StringArray { "Off", "HPF", "LPF", "Bell +6" }, 0));
     fl (scFreq, "SC Freq", freqRange(), 1000, "Hz", [] (float v, int) { return fmtHz (v); });
     fl (scQ, "SC Q", linRange (0.3f, 8, 0.1f), 0.7f, "", [] (float v, int) { return String (v, 1); });
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { scListen, 1 }, "Ecoute SC", false));
+    l.add (std::make_unique<AudioParameterBool> (ParameterID { scListen, 1 }, "SC Listen", false));
     fl (mix, "Dry/Wet", linRange (0, 100, 0.1f), 100, "%", [] (float v, int) { return String (roundToInt (v)) + "%"; });
     l.add (std::make_unique<AudioParameterBool> (ParameterID { bypass, 1 }, "Bypass", false));
     return l;
@@ -94,11 +94,11 @@ struct Preset
 // Presets pédagogiques d'Audio Lab : valeurs + ce qu'on doit entendre.
 // (« Side-chain anti-kick » : fréquence réglée à 150 Hz comme l'annonce sa description.)
 inline const Preset presets[] = {
-    { "Voix transparente", "Ratio 3:1, seuil léger, attaque 10 ms, release 80 ms, knee doux. La GR doit bouger de 2 à 5 dB sans s'entendre.", -22, 3, 8, 10, 80, 4, 0, 0, 0, 1000 },
-    { "Punch batterie", "Attaque lente (40 ms) laisse passer le transitoire, release rapide. La caisse claire « ressort ».", -18, 4, 2, 40, 50, 3, 0, 0, 0, 1000 },
-    { "Pompage volontaire", "Seuil très bas, ratio 8:1, attaque 1 ms, release 400 ms : le niveau respire au rythme. À reconnaître à l'oreille.", -40, 8, 0, 1, 400, 10, 0, 1, 0, 1000 },
-    { "Limiteur brickwall", "\xe2\x88\x9e:1, attaque minimale, lookahead 5 ms : plus rien ne dépasse le seuil.", -10, 20, 0, 0.1f, 60, 6, 5, 0, 0, 1000 },
-    { "Side-chain anti-kick", "Détecteur filtré passe-haut 150 Hz : le kick ne déclenche plus la compression.", -24, 4, 6, 5, 120, 3, 0, 0, 1, 150 },
+    { "Transparent vocal", "Ratio 3:1, light threshold, 10 ms attack, 80 ms release, soft knee. GR should move 2 to 5 dB without being heard.", -22, 3, 8, 10, 80, 4, 0, 0, 0, 1000 },
+    { "Drum punch", "Slow attack (40 ms) lets the transient through, fast release. The snare \"pops out\".", -18, 4, 2, 40, 50, 3, 0, 0, 0, 1000 },
+    { "Deliberate pumping", "Very low threshold, 8:1 ratio, 1 ms attack, 400 ms release: the level breathes with the beat. Learn to hear it.", -40, 8, 0, 1, 400, 10, 0, 1, 0, 1000 },
+    { "Brickwall limiter", "\xe2\x88\x9e:1, minimum attack, 5 ms lookahead: nothing goes above the threshold any more.", -10, 20, 0, 0.1f, 60, 6, 5, 0, 0, 1000 },
+    { "Side-chain anti-kick", "Detector high-passed at 150 Hz: the kick no longer triggers the compression.", -24, 4, 6, 5, 120, 3, 0, 0, 1, 150 },
 };
 inline constexpr int numPresets = (int) (sizeof (presets) / sizeof (presets[0]));
 } // namespace audiolab::params

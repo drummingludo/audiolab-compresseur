@@ -6,13 +6,13 @@ using juce::String;
 static String U (const char* s) { return String::fromUTF8 (s); }
 
 // Textes d'aide « Pourquoi ? » d'Audio Lab
-static const char* helpThr  = "Niveau à partir duquel le traitement agit. Plus bas = plus de signal concerné.";
-static const char* helpRat  = "Pente de réduction au-dessus du seuil : 4:1 → 4 dB en entrée ne donnent que 1 dB en sortie. ∞:1 = limiteur.";
-static const char* helpKn   = "Transition douce autour du seuil. Knee large = compression progressive, plus discrète.";
-static const char* helpAtk  = "Temps de réaction. Longue : le transitoire passe (punch). Courte : tout est tenu, le son s'aplatit.";
-static const char* helpRel  = "Temps de retour au gain unitaire. Trop court : pompage/distorsion ; trop long : le niveau reste écrasé.";
-static const char* helpMk   = "Gain de compensation après compression. Attention au biais « plus fort = mieux » : comparez à niveau égal.";
-static const char* helpLook = "Le détecteur voit le signal en avance : l'attaque peut rattraper les transitoires sans les laisser passer.";
+static const char* helpThr  = "Level above which the processing acts. Lower = more of the signal is affected.";
+static const char* helpRat  = "Reduction slope above the threshold: 4:1 → 4 dB in gives only 1 dB out. ∞:1 = limiter.";
+static const char* helpKn   = "Smooth transition around the threshold. Wide knee = gradual, more discreet compression.";
+static const char* helpAtk  = "Reaction time. Long: the transient gets through (punch). Short: everything is held, the sound flattens.";
+static const char* helpRel  = "Time to return to unity gain. Too short: pumping/distortion; too long: the level stays squashed.";
+static const char* helpMk   = "Make-up gain after compression. Beware the \"louder = better\" bias: compare at equal loudness.";
+static const char* helpLook = "The detector sees the signal in advance: the attack can catch the transients without letting them through.";
 
 static void headphonesIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
 {
@@ -27,7 +27,7 @@ static void headphonesIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::C
 
 AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
-      listenBtn (theme, U ("Écouter")),
+      listenBtn (theme, U ("Listen")),
       display (theme, p)
 {
     setLookAndFeel (&lnf);
@@ -62,19 +62,19 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     viewSeg.fontSize = 10;   // sélecteur de l'écran : 10 px (charte § 5)
     scBox.addItemList ({ "Off", "HPF", "LPF", "Bell +6" }, 1);
     scBox.setTitle ("Side-chain");
-    scBox.setTooltip (U ("Filtre du détecteur : le compresseur réagit seulement à la partie du spectre choisie."));
+    scBox.setTooltip (U ("Detector filter: the compressor only reacts to the chosen part of the spectrum."));
     scAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (ap, params::scType, scBox);
 
     listenBtn.icon = headphonesIcon;
-    listenBtn.setTooltip (U ("Écouter le signal qui pilote la compression (side-chain filtré)"));
+    listenBtn.setTooltip (U ("Listen to the signal that drives the compression (filtered side-chain)"));
     listenAtt = std::make_unique<juce::ParameterAttachment> (prm (params::scListen), [this] (float v) {
         listenBtn.on = v > 0.5f; listenBtn.repaint(); }, nullptr);
     listenBtn.onClick = [this]
     {
         const bool now = ! listenBtn.on;
         listenAtt->setValueAsCompleteGesture (now ? 1.0f : 0.0f);
-        if (now) toast.show (proc.getParam (params::scType) < 0.5f ? U ("Écoute du side-chain : signal du détecteur (aucun filtre actif)")
-                                                                   : U ("Écoute du side-chain filtré"), true);
+        if (now) toast.show (proc.getParam (params::scType) < 0.5f ? U ("Side-chain listen: detector signal (no filter active)")
+                                                                   : U ("Listening to the filtered side-chain"), true);
     };
     listenAtt->sendInitialUpdate();
 
@@ -82,7 +82,7 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
         bypassed = v > 0.5f; refreshState(); }, nullptr);
     bypassAtt->sendInitialUpdate();   // Bypass du logiciel : la lampe du VU s'éteint
     viewSeg.onSelect = [this] (int v) { display.setView (v); proc.ui.setProperty ("view", v, nullptr); };
-    advBtn.setTooltip (U ("Afficher / masquer Knee, Lookahead, Détection et Side-chain"));
+    advBtn.setTooltip (U ("Show / hide Knee, Lookahead, Detection and Side-chain"));
     advBtn.onClick = [this] { setAdvanced (! advOpen, true); };
 
     advItems = { rowKnee.get(), rowLook.get(), &detectSeg, &scBox, &listenBtn, rowScF.get(), rowScQ.get() };
@@ -155,7 +155,7 @@ void AudioLabCompEditor::Content::paint (juce::Graphics& g)
     // panneau des réglages avancés (« Surface », coins 12) + libellés des lignes Détection / Side-chain
     g.setColour (p.surface); g.fillRoundedRectangle (24, 354, 532, 126, 12);
     g.setColour (p.text2); g.setFont (ed.theme.ui (12));
-    g.drawText (U ("Détection"), juce::Rectangle<float> (40, 438, 68, 26), juce::Justification::centredLeft, false);
+    g.drawText (U ("Detection"), juce::Rectangle<float> (40, 438, 68, 26), juce::Justification::centredLeft, false);
     g.drawText ("Side-chain", juce::Rectangle<float> (306, 370, 68, 26), juce::Justification::centredLeft, false);   // trait d'union normal (Poppins)
 }
 

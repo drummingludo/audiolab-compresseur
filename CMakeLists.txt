@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
-project(AudioLabCompresseur VERSION 1.1.0 LANGUAGES C CXX)
+project(AudioLabCompresseur VERSION 1.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -36,9 +36,9 @@ if(ALC_STANDALONE)
 endif()
 
 juce_add_plugin(AudioLabCompresseur
-    PRODUCT_NAME "Audio Lab Compresseur"
-    PLUGIN_NAME "Audio Lab Compresseur"
-    DESCRIPTION "Compresseur pédagogique d'Audio Lab (Chimiste du son)"
+    PRODUCT_NAME "Audio Lab Compressor"
+    PLUGIN_NAME "Lab Comp"
+    DESCRIPTION "Teaching compressor from Audio Lab (Chimiste du son)"
     COMPANY_NAME "Transversal Studio"
     COMPANY_WEBSITE "https://transversalstudio.fr"
     COMPANY_EMAIL "ludo@transversalstudio.fr"

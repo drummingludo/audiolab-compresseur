@@ -1,4 +1,4 @@
-AUDIO LAB COMPRESSEUR — Mac (Apple Silicon et Intel)
+AUDIO LAB COMPRESSOR — Mac (Apple Silicon et Intel)
 Transversal Studio · Audio Lab « Chimiste du son »
 
 INSTALLATION
@@ -9,20 +9,20 @@ INSTALLATION
      tout en bas, bouton « Ouvrir quand même ».
 2. Relancez votre logiciel de musique.
 
-Le plugin apparaît sous le nom « Audio Lab Compresseur » (fabricant : Transversal Studio) :
+Le plugin apparaît sous le nom « Lab Comp » (fabricant : Transversal Studio) :
 - Logic Pro, GarageBand : format AU (Audio Units > Transversal Studio)
 - Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig : format VST3
 
 INSTALLATION MANUELLE (sans le script)
-- Audio Lab Compresseur.vst3      → ~/Library/Audio/Plug-Ins/VST3/
-- Audio Lab Compresseur.component → ~/Library/Audio/Plug-Ins/Components/
+- Audio Lab Compressor.vst3      → ~/Library/Audio/Plug-Ins/VST3/
+- Audio Lab Compressor.component → ~/Library/Audio/Plug-Ins/Components/
 
 PRO TOOLS (format AAX) — VERSION DE TEST
-Le dossier « Pro Tools (AAX non signé) » contient Audio Lab Compresseur.aaxplugin.
+Le dossier « Pro Tools (AAX non signé) » contient Audio Lab Compressor.aaxplugin.
 Il n'a pas encore la signature numérique PACE exigée par Pro Tools : il se charge
 uniquement dans Pro Tools Developer (version de test réservée aux développeurs Avid).
 - Pro Tools Developer : créez un dossier nommé « Plug-Ins » à côté de l'application
-  Pro Tools Developer et copiez-y Audio Lab Compresseur.aaxplugin, puis lancez-la.
+  Pro Tools Developer et copiez-y Audio Lab Compressor.aaxplugin, puis lancez-la.
 - Dans Pro Tools, le plugin se trouve dans la catégorie Dynamics (fabricant : Transversal Studio).
 - Pro Tools « normal » refusera ce fichier tant qu'il n'est pas signé.
 
