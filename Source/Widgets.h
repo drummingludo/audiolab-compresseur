@@ -104,9 +104,10 @@ public:
                 return juce::FillType (juce::ColourGradient (c0.withMultipliedAlpha (alpha), z, c1.withMultipliedAlpha (alpha), e, false));
             };
             juce::Path arc; arc.addCentredArc (cx, cy, r, r, 0, std::min (a, az), std::max (a, az), true);
-            const float boost = dragging ? 1.7f : 1.0f;
-            const float extra[] = { 7.0f * k, 4.5f * k, 2.4f * k }, alpha[] = { 0.05f, 0.10f, 0.16f };
-            for (int i = 0; i < 3; ++i)
+            // halo fin et discret (2 voiles : +1,6 et +3,2 px), à peine renforcé pendant le réglage
+            const float boost = dragging ? 1.5f : 1.0f;
+            const float extra[] = { 3.2f * k, 1.6f * k }, alpha[] = { 0.05f, 0.12f };
+            for (int i = 0; i < 2; ++i)
             {
                 g.setFillType (brush (std::min (1.0f, alpha[i] * boost)));
                 g.strokePath (arc, juce::PathStrokeType (sw + extra[i], juce::PathStrokeType::curved, juce::PathStrokeType::butt));
@@ -359,8 +360,8 @@ public:
             if (! dimmed)
             {
                 const auto glow = fam == Family::orange ? p.orange : p.teal2;
-                g.setColour (glow.withAlpha (0.12f)); g.fillRoundedRectangle (f.expanded (2.5f), 4);
-                g.setColour (glow.withAlpha (0.22f)); g.fillRoundedRectangle (f.expanded (1.2f), 3);
+                g.setColour (glow.withAlpha (0.05f)); g.fillRoundedRectangle (f.expanded (1.6f), 3.6f);   // halo fin et discret
+                g.setColour (glow.withAlpha (0.12f)); g.fillRoundedRectangle (f.expanded (0.8f), 2.8f);
             }
             g.setFillType (ft); g.fillRoundedRectangle (f, 2);
         }
