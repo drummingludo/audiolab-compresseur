@@ -14,8 +14,10 @@ public:
     void paint (juce::Graphics&) override {}
     void resized() override;
 
-    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md, charte V2) : 580 × 362 replié, 580 × 504 déplié
-    static constexpr int baseW = 580, baseH = 362, baseHOpen = 504;
+    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md, charte V2) : 580 × 362 replié ;
+    // déplié 580 × 640 depuis la 2.0.0 (panneau avancé de 7 lignes au lieu de 3)
+    static constexpr int baseW = 580, baseH = 362, baseHOpen = 640;
+    static constexpr int advRows = 7;
 
 private:
     // Contenu dessiné à taille fixe puis mis à l'échelle (fenêtre redimensionnable, proportions fixes)
@@ -25,6 +27,8 @@ private:
         explicit Content (AudioLabCompEditor& e) : ed (e) {}
         void paint (juce::Graphics& g) override;
         void resized() override;
+        float labelGap (const juce::String& label) const;
+        static constexpr int advRowsH = 34 * advRows;   // hauteur des lignes du panneau avancé (26 + 8 par ligne)
         AudioLabCompEditor& ed;
     };
 
@@ -45,6 +49,16 @@ private:
     std::unique_ptr<audiolab::ArcKnob> kThr, kRatio, kAtk, kRel, kMk;
     std::unique_ptr<audiolab::SliderRow> rowKnee, rowLook, rowScF, rowScQ;
     audiolab::SegButtons detectSeg { theme, { "Peak", "RMS" } };
+    // 2.0.0
+    std::unique_ptr<audiolab::SliderRow> rowRms, rowHold, rowLink;
+    audiolab::SegButtons relSeg { theme, { "Fixed", "Auto" } };
+    audiolab::SegButtons tpSeg { theme, { "Off", "On" } };
+    audiolab::SegButtons scSrcSeg { theme, { "Internal", "External" } };
+    audiolab::SegButtons modeSeg { theme, { "Stereo", "Mid-Side" } };
+    audiolab::SegButtons osSeg { theme, { "Off", juce::String::fromUTF8 ("2\xc3\x97"), juce::String::fromUTF8 ("4\xc3\x97") } };
+    // libellés des lignes à sélecteur du panneau (dessinés par Content::paint)
+    struct SegLabel { juce::String text; audiolab::SegButtons* seg; };
+    std::vector<SegLabel> segLabels;
     juce::ComboBox scBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> scAtt;
     audiolab::PillButton listenBtn;

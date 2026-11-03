@@ -37,8 +37,8 @@ void CompDisplay::setView (int v)
 
 double CompDisplay::curve (double di) const
 {
-    const double r = proc.getParam (params::ratio);
-    return CompressorCore::curve (di, proc.getParam (params::thr), r >= 20 ? 100 : r,   // ∞:1 = 100:1, comme le moteur
+    // ∞:1 (potentiomètre ≥ 20) : vrai limiteur, la courbe est un plafond horizontal (seuil + make-up), sans knee
+    return CompressorCore::curve (di, proc.getParam (params::thr), proc.getParam (params::ratio),
                                   proc.getParam (params::knee), proc.getParam (params::makeup));
 }
 
@@ -139,7 +139,8 @@ void CompDisplay::drawTransfer (Graphics& g, float W, float H, const M& m)
     const float cX = 1, cY = 1, cW = W - 2, cH = H - 2, lo = -60;
     auto X = [&] (double d) { return (float) (cX + (d - lo) / (0 - lo) * cW); };
     auto Y = [&] (double d) { return (float) (cY + cH - (d - lo) / (0 - lo) * cH); };
-    const float thr = proc.getParam (params::thr), kn = proc.getParam (params::knee);
+    // en ∞:1 (limiteur), le knee ne s'applique pas : pas de zone de knee
+    const float thr = proc.getParam (params::thr), kn = proc.getParam (params::ratio) >= 20 ? 0.0f : proc.getParam (params::knee);
 
     g.setColour (p.rail);
     for (int db = -48; db <= -12; db += 12)

@@ -2,9 +2,10 @@
 
 Le compresseur d'**Audio Lab** (« Chimiste du son », Transversal Studio) en plugin **VST3 / AU** pour Logic Pro, Ableton Live, FL Studio, Cubase, Reaper, Studio One, Bitwig…, et **AAX** pour Pro Tools (version de test non signée, voir plus bas).
 
-- **Même son que l'outil web** : le moteur est un portage ligne à ligne du processeur `al-comp` d'`Audio_Lab.html`. Le banc de test compare les deux versions : sortie identique au bit près à 44,1 / 48 / 96 kHz.
+- **Même son que l'outil web** aux réglages par défaut : le moteur est un portage ligne à ligne du processeur `al-comp` d'`Audio_Lab.html`. Le banc de test compare les deux versions : sortie identique au bit près à 44,1 / 48 / 96 kHz pour tout le compresseur (ratio < ∞).
+- **Version 2.0.0, qualité professionnelle** : ratio ∞ = vrai limiteur à plafond garanti (seuil + make-up, exact sur les échantillons, true peak en option), side-chain externe, stereo link, Mid-Side, Hold, release automatique, fenêtre RMS réglable, suréchantillonnage 2× / 4×, réglages lissés et changements sans clic. Détails, latences et mesures avant / après : `docs/06_GUI_Plugin_Compresseur.md`, § 9.
 - **Interface à la charte Transversal (V2)** : potentiomètres à arc, écran Transfert / Activité / Vu-Mètres (VU à cadran clair rétroéclairé), réglages avancés repliables, thème sombre, police Poppins, fenêtre redimensionnable. Dry/Wet et Bypass depuis le logiciel hôte.
-- Réglages : Threshold, Ratio (jusqu'à ∞:1), Knee, Attack (0,1–200 ms), Release (10–1000 ms), Makeup, Lookahead (0–10 ms, latence compensée), détection Peak / RMS, filtre de side-chain (HPF, LPF, cloche +6 dB) avec écoute du side-chain.
+- Réglages : Threshold, Ratio (jusqu'à ∞:1, vrai limiteur), Knee, Attack (0,1–200 ms), Release (10–1000 ms, Fixed / Auto), Makeup, Lookahead (0–10 ms, latence compensée), Hold (0–500 ms), détection Peak / RMS (fenêtre 1–300 ms), filtre de side-chain (HPF, LPF, cloche +6 dB) avec écoute, side-chain Internal / External, Stereo link (0–100 %), Stereo / Mid-Side, True peak, Oversampling Off / 2× / 4×.
 
 ## Télécharger
 
@@ -17,7 +18,7 @@ Mode d'emploi : fichier `LISEZ-MOI.txt` dans chaque archive.
 
 ### Pro Tools (AAX)
 
-Chaque archive contient aussi `Audio Lab Compressor.aaxplugin` (Mac universel, Windows 64 bits), fabriqué avec le SDK AAX fourni par JUCE (GPL v3). Il n'est **pas encore signé** par PACE : il ne se charge que dans **Pro Tools Developer**. Particularité AAX : la latence annoncée est fixe (10 ms, lookahead maximal), comme l'exige Pro Tools ; un retard interne complète le lookahead choisi, le son est identique à l'échantillon près au VST3 décalé.
+Chaque archive contient aussi `Audio Lab Compressor.aaxplugin` (Mac universel, Windows 64 bits), fabriqué avec le SDK AAX fourni par JUCE (GPL v3). Il n'est **pas encore signé** par PACE : il ne se charge que dans **Pro Tools Developer**. Particularité AAX : la latence annoncée est fixe (10 ms, lookahead maximal ; + 69 ou 76 éch. avec le suréchantillonnage), comme l'exige Pro Tools ; le gain est retardé du complément, le son est identique à l'échantillon près au VST3 décalé. Side-chain en mono dans Pro Tools.
 
 ## Fabrication
 
@@ -31,6 +32,7 @@ cmake --build build --config Release
 Tests (Linux ou Mac) :
 
 ```
+clang++ -O2 -std=c++17 -I Source tests/quality_test.cpp -o qt && ./qt   # banc qualité du moteur, sans JUCE
 cmake -B build -DALC_TESTS=ON -DALC_STANDALONE=ON
 cmake --build build --target ALCProcessorTest ALCRenderUI
 python3 tests/verify_dsp.py     # moteur C++ ↔ code web d'Audio Lab (Node.js requis)

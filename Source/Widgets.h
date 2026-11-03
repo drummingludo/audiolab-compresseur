@@ -268,6 +268,9 @@ public:
     void setSelected (int i) { selected = i; repaint(); }
     int getSelected() const { return selected; }
     std::function<void (int)> onSelect;
+    // Désactivé (réglage sans effet dans la situation actuelle) : textes en gris doux, pastille neutre ; reste cliquable
+    void setDimmed (bool d) { if (dimmed != d) { dimmed = d; repaint(); } }
+    bool isDimmed() const { return dimmed; }
 
     float idealWidth() const
     {
@@ -288,9 +291,9 @@ public:
             {
                 juce::Path pill; pill.addRoundedRectangle (r, 7);
                 softShadow (g, pill, juce::Colours::black.withAlpha (0.18f), 3, { 0, 1 });
-                g.setColour (p.tealSel); g.fillPath (pill);
+                g.setColour (dimmed ? p.cap : p.tealSel); g.fillPath (pill);
             }
-            const auto c = sel || (i == hover && isEnabled()) ? p.text : p.text2;
+            const auto c = dimmed ? p.soft : sel || (i == hover && isEnabled()) ? p.text : p.text2;
             if ((size_t) i < icons.size() && icons[(size_t) i]) { icons[(size_t) i] (g, r, c); continue; }
             g.setColour (c);
             g.setFont (theme.ui (fontSize, sel ? 500 : 400));
@@ -331,6 +334,7 @@ private:
     Theme& theme;
     juce::StringArray options;
     int selected = 0, hover = -1;
+    bool dimmed = false;
     std::unique_ptr<juce::ParameterAttachment> attachment;
 };
 

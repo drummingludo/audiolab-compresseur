@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Banc qualité du moteur (plafond, latence, repliement, transitions)
+        run: clang++ -O2 -std=c++17 -I Source tests/quality_test.cpp -o qt && ./qt
+
       - name: Compiler
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release

@@ -46,9 +46,15 @@ public:
     float getParam (const char* id) const { return apvts.getRawParameterValue (id)->load(); }
 
     // Pro Tools (AAX) exige une latence qui ne change jamais pendant la lecture : la latence annoncée
-    // est alors fixée au lookahead maximal (10 ms) et un retard interne complète le lookahead choisi.
-    // Activé automatiquement en AAX (prepareToPlay) ; VST3 et AU gardent la latence = lookahead.
+    // est alors fixée au lookahead maximal (10 ms) et le gain est retardé du complément (le son, lui, est
+    // toujours lu à 10 ms). Activé automatiquement en AAX (prepareToPlay) ; VST3 et AU gardent la latence
+    // = lookahead. Le suréchantillonnage ajoute sa latence (69 ou 76 éch.) dans les deux cas.
     bool constantLatency = false;
+
+    // Side-chain externe : vrai si le logiciel hôte a branché le bus « Sidechain » (pour l'interface)
+    bool sideChainConnected() const { return scConnected.load(); }
+    // Limiteur ∞ : la crête vraie est-elle active (il faut au moins 1 ms de lookahead) ?
+    bool truePeakActive() const { return tpActive.load(); }
 
     // Mesures pour l'affichage (thread audio → interface)
     struct Meters { float inDb = -80, outDb = -80, grDb = 0, grMaxDb = 0; bool active = false; };
@@ -61,16 +67,12 @@ private:
     audiolab::CompressorCore core;
     juce::AudioProcessorParameter* bypassParam = nullptr;
 
-    // Chemin sec retardé du même lookahead que le chemin traité (pas de filtrage en peigne au Dry/Wet)
-    std::vector<float> dryL, dryR;
-    int dryW = 0;
-    std::vector<float> wetL, wetR, monoR;
+    // Le moteur rend le signal traité ET le signal sec recalé sur la même latence (pas de filtrage en peigne
+    // au Dry/Wet ni au bypass, même pendant un changement de lookahead ou de suréchantillonnage)
+    std::vector<float> wetL, wetR, dryL, dryR;
     juce::SmoothedValue<float> mixSm, bypassSm;
     int latency = -1;
-
-    // Retard de complément (mode latence constante) : fixedLatency − lookahead
-    std::vector<float> padL, padR;
-    int padW = 0, fixedLatency = 0;
+    std::atomic<bool> scConnected { false }, tpActive { false };
 
     // Valeur efficace sur 4096 échantillons (AnalyserNode fftSize 4096 dans Audio Lab), voies sommées en mono
     struct Rms

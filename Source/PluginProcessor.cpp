@@ -5,12 +5,15 @@ using namespace audiolab;
 
 static const char* snapshotParams[] = { params::thr, params::ratio, params::knee, params::attack, params::release,
                                         params::makeup, params::look, params::detect, params::scType, params::scFreq,
-                                        params::scQ, params::mix };
+                                        params::scQ, params::mix,
+                                        params::truePeak, params::scSource, params::link, params::stMode, params::hold,
+                                        params::autoRel, params::rmsWin, params::oversamp };
 
 AudioLabCompProcessor::AudioLabCompProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)),   // bus optionnel (2.0.0)
       apvts (*this, nullptr, "AudioLabCompresseur", params::createLayout()),
       ui ("ui")
 {
@@ -25,15 +28,21 @@ bool AudioLabCompProcessor::isBusesLayoutSupported (const BusesLayout& layouts) 
 {
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) return false;
-    return out == layouts.getMainInputChannelSet();
+    if (out != layouts.getMainInputChannelSet()) return false;
+    // side-chain : absent, mono (AAX) ou stéréo
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto sc = layouts.getChannelSet (true, 1);
+        if (! sc.isDisabled() && sc != juce::AudioChannelSet::mono() && sc != juce::AudioChannelSet::stereo()) return false;
+    }
+    return true;
 }
 
 CompParams AudioLabCompProcessor::currentParams() const
 {
     CompParams p;
     p.thr = getParam (params::thr);
-    const float r = getParam (params::ratio);
-    p.ratio = r >= 20 ? 100 : r;                    // ∞:1, comme compParams()
+    p.ratio = getParam (params::ratio);             // ≥ 20 = ∞:1 : vrai limiteur (le moteur le reconnaît)
     p.knee = getParam (params::knee);
     p.atk = getParam (params::attack) / 1000.0;
     p.rel = getParam (params::release) / 1000.0;
@@ -44,35 +53,30 @@ CompParams AudioLabCompProcessor::currentParams() const
     p.scF = getParam (params::scFreq);
     p.scQ = getParam (params::scQ);
     p.scListen = getParam (params::scListen) > 0.5f;
+    p.truePeak = getParam (params::truePeak) > 0.5f;
+    p.scExternal = getParam (params::scSource) > 0.5f;
+    p.link = getParam (params::link) / 100.0;
+    p.midSide = getParam (params::stMode) > 0.5f;
+    p.hold = getParam (params::hold) / 1000.0;
+    p.autoRel = getParam (params::autoRel) > 0.5f;
+    p.rmsWin = getParam (params::rmsWin) / 1000.0;
+    p.os = juce::roundToInt (getParam (params::oversamp));
     return p;
 }
 
 void AudioLabCompProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    core.prepare (sampleRate);
-    core.setParams (currentParams());
-    const int maxLook = core.maxLookahead();
-    dryL.assign ((size_t) maxLook + 1, 0.0f);
-    dryR.assign ((size_t) maxLook + 1, 0.0f);
-    dryW = 0;
+    if (wrapperType == wrapperType_AAX) constantLatency = true;
+    core.prepare (sampleRate, constantLatency, currentParams());   // toute la mémoire du moteur est réservée ici
     const int block = std::max (512, samplesPerBlock);
-    wetL.assign ((size_t) block, 0.0f);
-    wetR.assign ((size_t) block, 0.0f);
-    monoR.assign ((size_t) block, 0.0f);
+    for (auto* v : { &wetL, &wetR, &dryL, &dryR }) v->assign ((size_t) block, 0.0f);
     mixSm.reset (sampleRate, 0.02);
     mixSm.setCurrentAndTargetValue (getParam (params::mix) / 100.0f);
     bypassSm.reset (sampleRate, 0.02);
     bypassSm.setCurrentAndTargetValue (getParam (params::bypass) > 0.5f ? 1.0f : 0.0f);
     rmsIn.clear(); rmsOut.clear();
 
-    if (wrapperType == wrapperType_AAX) constantLatency = true;
-    const double lookMaxSec = apvts.getParameterRange (params::look).end / 1000.0;
-    fixedLatency = std::min (maxLook, (int) std::floor (lookMaxSec * sampleRate + 0.5));
-    padL.assign ((size_t) fixedLatency + 1, 0.0f);
-    padR.assign ((size_t) fixedLatency + 1, 0.0f);
-    padW = 0;
-
-    latency = constantLatency ? fixedLatency : core.lookaheadSamples();
+    latency = core.latency();
     setLatencySamples (latency);
 }
 
@@ -80,40 +84,44 @@ void AudioLabCompProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 {
     juce::ScopedNoDenormals noDenormals;
     const int total = buffer.getNumSamples();
-    const int nIn = getTotalNumInputChannels();
-    for (int ch = nIn; ch < getTotalNumOutputChannels(); ++ch) buffer.clear (ch, 0, total);
+    const int nIn = getMainBusNumInputChannels(), nOut = getMainBusNumOutputChannels();
+    for (int ch = nIn; ch < nOut; ++ch) buffer.clear (ch, 0, total);
     if (nIn == 0 || total == 0) return;
+
+    // side-chain externe : seulement si le logiciel hôte a branché le bus (sinon détection interne)
+    const float* sL = nullptr; const float* sR = nullptr;
+    if (getBusCount (true) > 1)
+    {
+        auto sc = getBusBuffer (buffer, true, 1);
+        if (sc.getNumChannels() > 0) { sL = sc.getReadPointer (0); sR = sc.getReadPointer (sc.getNumChannels() > 1 ? 1 : 0); }
+    }
+    scConnected.store (sL != nullptr);
 
     const auto p = currentParams();
     core.setParams (p);
-    const int look = core.lookaheadSamples();
-    if (! constantLatency && look != latency) { latency = look; setLatencySamples (look); }
-    const int pad = constantLatency ? std::max (0, fixedLatency - look) : 0;
-    const int plen = (int) padL.size();
 
     mixSm.setTargetValue (getParam (params::mix) / 100.0f);
     bypassSm.setTargetValue (getParam (params::bypass) > 0.5f ? 1.0f : 0.0f);
 
     float* L = buffer.getWritePointer (0);
     float* R = nIn > 1 ? buffer.getWritePointer (1) : nullptr;
-    const int len = (int) dryL.size();
     const int chunkMax = (int) wetL.size();
 
     for (int off = 0; off < total; off += chunkMax)
     {
         const int n = std::min (chunkMax, total - off);
         const float* inR = R != nullptr ? R + off : L + off; // mono : R = L (comme inp[1]||inp[0])
-        core.process (L + off, inR, wetL.data(), wetR.data(), n);
+        core.process (L + off, inR, sL != nullptr ? sL + off : nullptr, sR != nullptr ? sR + off : nullptr,
+                      wetL.data(), wetR.data(), dryL.data(), dryR.data(), n);
+        // latence annoncée : elle ne change qu'au début d'un fondu (lookahead en VST3 / AU, suréchantillonnage)
+        if (core.latency() != latency) { latency = core.latency(); setLatencySamples (latency); }
 
         for (int i = 0; i < n; ++i)
         {
             const float xl = L[off + i], xr = inR[i];
             rmsIn.push ((xl + xr) * 0.5f);
 
-            dryL[(size_t) dryW] = xl; dryR[(size_t) dryW] = xr;
-            const int ri = (dryW - look + len) % len;
-            const float dl = dryL[(size_t) ri], dr = dryR[(size_t) ri];
-            dryW = (dryW + 1) % len;
+            const float dl = dryL[(size_t) i], dr = dryR[(size_t) i];   // sec recalé par le moteur
 
             const float m = mixSm.getNextValue(), b = bypassSm.getNextValue();
             float pl, pr;
@@ -126,19 +134,12 @@ void AudioLabCompProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
                 pr = dr * gd + wetR[(size_t) i] * gw;
             }
             const float ol = pl * (1 - b) + dl * b, orr = pr * (1 - b) + dr * b;
-            float yl = ol, yr = orr;
-            if (constantLatency)
-            {
-                padL[(size_t) padW] = ol; padR[(size_t) padW] = orr;
-                const int pi = (padW - pad + plen) % plen;
-                yl = padL[(size_t) pi]; yr = padR[(size_t) pi];
-                padW = (padW + 1) % plen;
-            }
-            L[off + i] = yl;
-            if (R != nullptr) R[off + i] = yr;
+            L[off + i] = ol;
+            if (R != nullptr) R[off + i] = orr;
             rmsOut.push (R != nullptr ? (ol + orr) * 0.5f : ol);
         }
     }
+    tpActive.store (core.truePeakActive());
     inDb.store (rmsIn.db());
     outDb.store (rmsOut.db());
     lastBlockMs.store (juce::Time::getMillisecondCounter());
@@ -169,10 +170,14 @@ void AudioLabCompProcessor::setParam (const char* id, float value)
 void AudioLabCompProcessor::applyPreset (int index)
 {
     // Comme Audio Lab : Reset de l'outil (Dry/Wet inchangé), puis valeurs du preset.
+    // Les réglages 2.0.0 du détecteur reviennent aussi à leur valeur par défaut ; le suréchantillonnage
+    // (choix de qualité et de charge de calcul) et le Dry/Wet ne changent pas.
     setParam (params::thr, 0); setParam (params::ratio, 1); setParam (params::knee, 0);
     setParam (params::attack, 0.1f); setParam (params::release, 10); setParam (params::makeup, 0);
     setParam (params::look, 0); setParam (params::detect, 0); setParam (params::scType, 0);
     setParam (params::scFreq, 1000); setParam (params::scQ, 0.7f); setParam (params::scListen, 0);
+    setParam (params::truePeak, 1); setParam (params::scSource, 0); setParam (params::link, 100);
+    setParam (params::stMode, 0); setParam (params::hold, 0); setParam (params::autoRel, 0); setParam (params::rmsWin, 3);
     if (index >= 0 && index < params::numPresets)
     {
         const auto& pr = params::presets[index];
@@ -226,6 +231,17 @@ void AudioLabCompProcessor::setStateInformation (const void* data, int sizeInByt
             ui.copyPropertiesAndChildrenFrom (u, nullptr);
             state.removeChild (u, nullptr);
         }
+        // Session d'une version antérieure : les réglages ajoutés depuis n'y sont pas. JUCE leur laisserait leur
+        // valeur du moment ; on les remet explicitement à leur valeur par défaut (comportement de la 1.x).
+        for (auto* prm : getParameters())
+            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                if (! state.getChildWithProperty ("id", rp->paramID).isValid())
+                {
+                    juce::ValueTree child ("PARAM");
+                    child.setProperty ("id", rp->paramID, nullptr);
+                    child.setProperty ("value", rp->convertFrom0to1 (rp->getDefaultValue()), nullptr);
+                    state.appendChild (child, nullptr);
+                }
         apvts.replaceState (state);
     }
 }

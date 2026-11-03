@@ -1,5 +1,15 @@
 """Banc de test du moteur : compare le plugin (C++) au vrai code d'Audio Lab (JS),
-puis mesure seuil, ratio, knee, attaque, release, lookahead et filtres de side-chain."""
+puis mesure seuil, ratio, knee, attaque, release, lookahead et filtres de side-chain.
+
+Version 2.0.0 (décision du 03/11/2026 : les plugins sont la version « pro », la page web ne change pas
+pour l'instant). Ce qui reste comparé au bit près au code web : tous les réglages du compresseur
+(ratio < ∞) avec les nouveaux réglages à leur valeur par défaut (Off / Internal / 100 % / Stereo / Hold 0 /
+Auto Off / RMS 3 ms). Retiré parce que devenu volontairement faux :
+  - la comparaison « Limiteur brickwall (∞:1) » : ∞ est maintenant un vrai limiteur à plafond garanti,
+    le web garde son compresseur 100:1 ;
+  - la courbe statique ∞ comparée à 100:1 : remplacée par la courbe du limiteur (plafond = seuil + make-up) ;
+  - la mesure des temps d'attaque / release se fait à 10:1 (en ∞, l'attaque est faite par l'anticipation).
+Le reste des nouveautés est mesuré par tests/quality_test.cpp (sans JUCE)."""
 import json, os, subprocess, sys, numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -56,7 +66,6 @@ cases = [
     ("Voix transparente", P(thr=-22, ratio=3, knee=8, atk=0.010, rel=0.080, mk=4)),
     ("Punch batterie", P(thr=-18, ratio=4, knee=2, atk=0.040, rel=0.050, mk=3)),
     ("Pompage volontaire (RMS)", P(thr=-40, ratio=8, knee=0, atk=0.001, rel=0.400, mk=10, det="rms")),
-    ("Limiteur brickwall (∞:1, lookahead 5 ms)", P(thr=-10, ratio=100, knee=0, atk=0.0001, rel=0.060, mk=6, look=0.005)),
     ("Side-chain anti-kick (HPF 150 Hz)", P(thr=-24, ratio=4, knee=6, atk=0.005, rel=0.120, mk=3, scType="hpf", scF=150)),
     ("Side-chain LPF 300 Hz, Q 2", P(thr=-30, ratio=6, knee=4, atk=0.002, rel=0.200, scType="lpf", scF=300, scQ=2)),
     ("Side-chain cloche +6 dB 3 kHz", P(thr=-28, ratio=5, knee=10, atk=0.0005, rel=0.150, scType="bell", scF=3000, scQ=1.5)),
@@ -85,6 +94,7 @@ def static_out(thr, ratio, knee, mk, lvl_db):
     y = core_only(fs, np.stack([s, s], 1), P(thr=thr, ratio=ratio, knee=knee, atk=0.001, rel=0.05, mk=mk))
     return 20 * np.log10(np.abs(y[-1, 0]))
 def theory(di, thr, r, kn, mk):
+    if r >= 20: return min(di, thr) + mk      # ∞ : vrai limiteur (plafond = seuil + make-up), depuis la 2.0.0
     hk = kn / 2; ex = di - thr
     if ex <= -hk: o = di
     elif ex < hk and kn > 0: o = di + (1 / r - 1) * (ex + hk) ** 2 / (2 * kn)
@@ -102,7 +112,7 @@ def step_times(atk_ms, rel_ms):
     n = int(fs * (atk_ms * 8 + rel_ms * 8) / 1000) + fs // 10
     on = int(0.02 * fs); off = on + int(atk_ms * 8 / 1000 * fs) + 10
     x = np.full(n, 0.01, np.float32); x[on:off] = 1.0   # -40 dBFS → 0 dBFS → -40 dBFS
-    y = core_only(fs, np.stack([x, x], 1), P(thr=-40, ratio=100, atk=atk_ms / 1000, rel=rel_ms / 1000))[:, 0]
+    y = core_only(fs, np.stack([x, x], 1), P(thr=-40, ratio=10, atk=atk_ms / 1000, rel=rel_ms / 1000))[:, 0]
     gr = -20 * np.log10(np.abs(y) / np.abs(x))          # réduction appliquée (dB)
     tgt = gr[off - 1]
     def cross(seg, lvl, up):

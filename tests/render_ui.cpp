@@ -79,7 +79,19 @@ int main (int argc, char** argv)
     steps.push_back ({ 800,  [&] { std::printf ("taille apres fermeture : %dx%d (attendu %dx%d)\n", ed->getWidth(), ed->getHeight(),
                                                 juce::roundToInt (AudioLabCompEditor::baseW * 0.6), juce::roundToInt (AudioLabCompEditor::baseH * 0.6));
                                    ed->setSize (AudioLabCompEditor::baseW * 2, AudioLabCompEditor::baseH * 2); } });
-    steps.push_back ({ 800,  [&] { shot ("12_200pc"); juce::MessageManager::getInstance()->stopDispatchLoop(); } });
+    steps.push_back ({ 800,  [&] { shot ("12_200pc"); adv (true); rebuild(); ed->setSize (AudioLabCompEditor::baseW * 2, AudioLabCompEditor::baseHOpen * 2); } });
+    // 2.0.0 : panneau avancé complet (200 %, 100 %), limiteur ∞ (réglages sans effet grisés, courbe de plafond)
+    steps.push_back ({ 900,  [&] { shot ("13_200pc_deplie"); proc->applyPreset (3); setView (0); rebuild(); } });
+    steps.push_back ({ 1200, [&] { shot ("14_deplie_limiteur"); proc->apvts.getParameter (audiolab::params::stMode)->setValueNotifyingHost (1.0f);
+                                   proc->apvts.getParameter (audiolab::params::autoRel)->setValueNotifyingHost (1.0f);
+                                   proc->apvts.getParameter (audiolab::params::detect)->setValueNotifyingHost (1.0f);
+                                   proc->apvts.getParameter (audiolab::params::oversamp)->setValueNotifyingHost (1.0f);
+                                   proc->applyPreset (0); proc->apvts.getParameter (audiolab::params::detect)->setValueNotifyingHost (1.0f);
+                                   proc->apvts.getParameter (audiolab::params::stMode)->setValueNotifyingHost (1.0f);
+                                   proc->apvts.getParameter (audiolab::params::link)->setValueNotifyingHost (0.4f);
+                                   proc->apvts.getParameter (audiolab::params::hold)->setValueNotifyingHost (0.45f);
+                                   setView (2); rebuild(); } });
+    steps.push_back ({ 1500, [&] { shot ("15_deplie_midside_rms"); juce::MessageManager::getInstance()->stopDispatchLoop(); } });
 
     std::function<void (size_t)> next = [&] (size_t i)
     {
