@@ -25,6 +25,37 @@ static void headphonesIcon (juce::Graphics& g, juce::Rectangle<float> r, juce::C
     g.fillRoundedRectangle (r.getRight() - 3.2f, r.getY() + 6.5f, 3.2f, 5.5f, 1.2f);
 }
 
+// Icônes du sélecteur de vue (16 × 14 px, trait 1,5) : courbe de transfert, activité (forme d'onde), VU-mètres (barres)
+static void iconTransfer (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+{
+    const auto b = r.withSizeKeepingCentre (16, 14);
+    juce::Path p;   // montée en diagonale puis coude : la courbe d'un compresseur
+    p.startNewSubPath (b.getX() + 1, b.getBottom() - 1);
+    p.lineTo (b.getX() + 8, b.getY() + 3.5f);
+    p.lineTo (b.getRight() - 1, b.getY() + 1.5f);
+    g.setColour (c);
+    g.strokePath (p, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+static void iconActivity (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+{
+    const auto b = r.withSizeKeepingCentre (17, 14);
+    static constexpr float h[] = { 3, 7, 12, 8, 13, 6, 9, 4 };   // forme d'onde symétrique autour du centre
+    g.setColour (c);
+    for (int i = 0; i < 8; ++i)
+    {
+        const float x = b.getX() + 1 + i * 2.1f;
+        g.drawLine (x, b.getCentreY() - h[i] / 2, x, b.getCentreY() + h[i] / 2, 1.2f);
+    }
+}
+static void iconMeters (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c)
+{
+    const auto b = r.withSizeKeepingCentre (14, 13);
+    static constexpr float h[] = { 6, 13, 9 };   // trois barres de niveau posées sur une ligne
+    g.setColour (c);
+    for (int i = 0; i < 3; ++i)
+        g.fillRoundedRectangle (b.getX() + 1 + i * 4.5f, b.getBottom() - h[i], 2.6f, h[i], 1.0f);
+}
+
 AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
       listenBtn (theme, U ("Listen")),
@@ -60,6 +91,7 @@ AudioLabCompEditor::AudioLabCompEditor (AudioLabCompProcessor& p)
     detectSeg.onSurface = true;
     detectSeg.attach (prm (params::detect));
     viewSeg.fontSize = 10;   // sélecteur de l'écran : 10 px (charte § 5)
+    viewSeg.icons = { iconTransfer, iconActivity, iconMeters };   // icônes à la place des mots Transfer / Activity / Meters
     scBox.addItemList ({ "Off", "HPF", "LPF", "Bell +6" }, 1);
     scBox.setTitle ("Side-chain");
     scBox.setTooltip (U ("Detector filter: the compressor only reacts to the chosen part of the spectrum."));

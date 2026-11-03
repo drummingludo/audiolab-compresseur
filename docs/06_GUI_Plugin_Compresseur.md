@@ -46,7 +46,7 @@ Ce document fait foi pour la mise en page du plugin ; les couleurs, la police et
 
 - **À gauche : « Réglages avancés »** avec chevron (12 px). Le chevron est aligné sur la marge de 24 px. Fermé : chevron « › », texte #C9C9CA. Ouvert : chevron « ⌄ », texte #F9F9FB.
 - **À droite, sur la largeur exacte de l'écran (x 286 → 556), écart de 8 px entre les deux :**
-  - **Sélecteur de vue** « Transfert | Activité | Vu-Mètres » : bande #2A2B29, coins 9, marge intérieure 3 px, 3 segments de largeur égale, texte 10 px #C9C9CA. Segment choisi : pastille #005F73, texte #F9F9FB en 500, coins 7, ombre 0 1 3 rgba(0,0,0,.18).
+  - **Sélecteur de vue** « Transfert | Activité | Vu-Mètres », **en icônes depuis la 1.2.1** (courbe coudée = Transfert, forme d'onde = Activité, trois barres = Vu-Mètres ; le nom s'affiche en bulle d'aide) : bande #2A2B29, coins 9, marge intérieure 3 px, 3 segments de largeur égale, texte 10 px #C9C9CA. Segment choisi : pastille #005F73, texte #F9F9FB en 500, coins 7, ombre 0 1 3 rgba(0,0,0,.18).
   - **Petit Make-up** (bouton de 28 px, coin bas droit) : arc teal secondaire #79AFB0 rayon 11,5, épaisseur 2,4, capuchon #373837 de 16 px, repère, halo. À sa gauche, deux lignes alignées à droite : « MAKEUP » (9 px semi-gras, interlettrage 0,04 em) et la valeur « +4 dB » (10 px, #C9C9CA).
 
 ## 5. Écran carré (270 × 270)

@@ -252,6 +252,9 @@ public:
     bool vertical = false;      // boutons empilés (Ratio, Meter)
     bool onSurface = false;     // posé sur une surface : bande couleur « Rails »
     float fontSize = 12, gap = 2, padX = 12;
+    // Icônes à la place du texte (facultatif) : le nom reste en bulle d'aide et pour l'accessibilité
+    using Icon = std::function<void (juce::Graphics&, juce::Rectangle<float>, juce::Colour)>;
+    std::vector<Icon> icons;
 
     // Relie à un paramètre « choix »
     void attach (juce::RangedAudioParameter& prm)
@@ -287,10 +290,18 @@ public:
                 softShadow (g, pill, juce::Colours::black.withAlpha (0.18f), 3, { 0, 1 });
                 g.setColour (p.tealSel); g.fillPath (pill);
             }
-            g.setColour (sel || (i == hover && isEnabled()) ? p.text : p.text2);
+            const auto c = sel || (i == hover && isEnabled()) ? p.text : p.text2;
+            if ((size_t) i < icons.size() && icons[(size_t) i]) { icons[(size_t) i] (g, r, c); continue; }
+            g.setColour (c);
             g.setFont (theme.ui (fontSize, sel ? 500 : 400));
             g.drawText (options[i], r, juce::Justification::centred, false);
         }
+    }
+    // avec des icônes, la bulle d'aide donne le nom du segment survolé
+    juce::String getTooltip() override
+    {
+        if (! icons.empty() && hover >= 0 && hover < options.size()) return options[hover];
+        return SettableTooltipClient::getTooltip();
     }
     void mouseMove (const juce::MouseEvent& e) override { const int h = hit (e.position); if (h != hover) { hover = h; repaint(); } }
     void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
