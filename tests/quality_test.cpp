@@ -26,7 +26,7 @@ using Change = std::function<void (int pos, CompParams&)>;
 static Out run (double fs, const std::vector<float>& L, const std::vector<float>& R, CompParams p, bool constLat = false,
                 const std::vector<float>* sL = nullptr, const std::vector<float>* sR = nullptr, int block = 256, Change ch = {})
 {
-    CompressorCore c; c.prepare (fs, constLat, p);
+    CompressorEngine c; c.prepare (fs, constLat, p);
     const int n = (int) L.size();
     Out o; o.L.resize ((size_t) n); o.R.resize ((size_t) n); o.dL.resize ((size_t) n); o.dR.resize ((size_t) n);
     for (int off = 0; off < n; off += block)
@@ -126,11 +126,14 @@ static double clickDb (const std::vector<float>& y, double fs, double amp, size_
     return dB (m / amp);
 }
 // Repliement : énergie hors harmoniques de f0 rapportée au fondamental (dB)
-static double aliasDb (const std::vector<float>& y, double fs, double f0)
+static double aliasDb (const std::vector<float>& y, double fs, double f0, double fmax = 1e9)
 {
     const size_t N = 1 << 15; std::vector<std::complex<double>> a (N);
     const size_t off = y.size() - N;
-    for (size_t i = 0; i < N; ++i) { const double x = 2 * PI * i / N; a[i] = y[off + i] * (0.35875 - 0.48829 * std::cos (x) + 0.14128 * std::cos (2 * x) - 0.01168 * std::cos (3 * x)); }
+    // fenêtre de Kaiser β 30 (lobes secondaires sous −200 dB : la mesure descend bien sous −100 dB)
+    auto I0 = [] (double v) { double s = 1, q = 1; for (int k = 1; k < 200; ++k) { q *= (v / 2) / k; s += q * q; } return s; };
+    const double i0b = I0 (30.0);
+    for (size_t i = 0; i < N; ++i) { const double r = 2.0 * i / (N - 1) - 1; a[i] = y[off + i] * I0 (30.0 * std::sqrt (std::max (0.0, 1 - r * r))) / i0b; }
     for (size_t i = 1, j = 0; i < N; ++i) { size_t bit = N >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) std::swap (a[i], a[j]); }
     for (size_t len = 2; len <= N; len <<= 1)
     {
@@ -141,9 +144,9 @@ static double aliasDb (const std::vector<float>& y, double fs, double f0)
     for (size_t k = 0; k < N / 2; ++k)
     {
         const double f = k * bin, P = std::norm (a[k]);
-        bool harm = f < 6 * bin;
-        for (int h = 1; h * f0 < fs / 2; ++h) if (std::abs (f - h * f0) < 6 * bin) harm = true;
-        if (std::abs (f - f0) < 6 * bin) fund += P; else if (! harm) rest += P;
+        bool harm = f < 24 * bin;
+        for (int h = 1; h * f0 < fs / 2; ++h) if (std::abs (f - h * f0) < 24 * bin) harm = true;
+        if (std::abs (f - f0) < 24 * bin) fund += P; else if (! harm && f <= fmax) rest += P;
     }
     return 10 * std::log10 (rest / fund + 1e-30);
 }
@@ -271,7 +274,7 @@ int main()
         std::vector<float> nz (48000); for (auto& v : nz) v = (float) G (rng);
         auto bl = lowpass (nz, fs, 18000);
         for (bool aax : { false, true })
-            for (int os : { 0, 1, 2 })
+            for (int os : { 0, 1, 2, 3 })
                 for (double look : { 0.0, 0.005, 0.010 })
                 {
                     CompParams p; p.look = look; p.os = os;
@@ -279,34 +282,38 @@ int main()
                     auto o = run (fs, imp, imp, p, aax);
                     int pw = 0, pd = 0;
                     for (int i = 0; i < 8192; ++i) { if (std::abs (o.L[(size_t) i]) > std::abs (o.L[(size_t) pw])) pw = i; if (std::abs (o.dL[(size_t) i]) > std::abs (o.dL[(size_t) pd])) pd = i; }
-                    const int expect = (aax ? 480 : (int) std::lround (look * fs)) + (os == 0 ? 0 : os == 1 ? 69 : 76);
+                    const int expect = (aax ? 480 : (int) std::lround (look * fs)) + (os == 0 ? 0 : os == 1 ? 85 : os == 2 ? 93 : 96);
                     auto n = run (fs, bl, bl, p, aax);
                     double num = 0, den = 0;
                     for (size_t i = 4096; i < bl.size(); ++i) { const double d = (double) n.L[i] - n.dL[i]; num += d * d; den += (double) n.dL[i] * n.dL[i]; }
                     const double nul = 10 * std::log10 (num / den + 1e-30);
                     std::snprintf (m, sizeof m, "%s, %d×, lookahead %4.1f ms : latence %d (attendu %d), traité / sec au même endroit (%d / %d), nul traité − sec %.1f dB",
                                    aax ? "AAX " : "VST3", 1 << os, look * 1000, o.lat, expect, pw - 1000, pd - 1000, nul);
-                    check (o.lat == expect && pw - 1000 == expect && pd - 1000 == expect && (os == 0 ? num == 0 : nul < -75), m);
+                    check (o.lat == expect && pw - 1000 == expect && pd - 1000 == expect && num == 0, m);   // 3.0.0 : nul parfait aussi en suréchantillonnant
                 }
     }
 
     // ─────────────────────────────────────────────────────────────────────
     std::printf ("\n4) Suréchantillonnage : repliement d'un sinus aigu compressé vite (att 0.1 ms, rel 10 ms, 4:1)\n");
     {
-        struct T { double fs, f0, lvl, thr, ratio, lim2, lim4; };
-        for (T t : { T { 44100, 9500, -6, -30, 4, -60, -75 }, T { 44100, 9500, -12, -24, 8, -60, -75 }, T { 48000, 15000, -6, -30, 4, -54, -80 }, T { 48000, 5000, -6, -30, 4, -65, -75 } })
-        {
-            double r[3];
-            for (int os = 0; os < 3; ++os)
+        // 3.0.0 : cible −100 dB en qualité maximale (8×), filtres à phase linéaire comme à phase minimale
+        struct T { double fs, f0, lvl, thr, ratio; };
+        for (T t : { T { 44100, 9500, -6, -30, 4 }, T { 44100, 9500, -12, -24, 8 }, T { 48000, 15000, -6, -30, 4 }, T { 48000, 5000, -6, -30, 4 }, T { 96000, 15000, -6, -30, 4 } })
+            for (bool mn : { false, true })
             {
-                CompParams p; p.thr = t.thr; p.ratio = t.ratio; p.atk = 0.0001; p.rel = 0.010; p.os = os;
-                auto x = sine (t.fs, t.f0, t.lvl, 1.2);
-                auto o = run (t.fs, x, x, p);
-                r[os] = aliasDb (o.L, t.fs, t.f0);
+                double r[4], full = 0;
+                for (int os = 0; os < 4; ++os)
+                {
+                    CompParams p; p.thr = t.thr; p.ratio = t.ratio; p.atk = 0.0001; p.rel = 0.010; p.os = os; p.osMin = mn;
+                    auto x = sine (t.fs, t.f0, t.lvl, 1.2);
+                    auto o = run (t.fs, x, x, p);
+                    r[os] = aliasDb (o.L, t.fs, t.f0, 20000);       // bande audible, jusqu'à 20 kHz
+                    if (os == 3) full = aliasDb (o.L, t.fs, t.f0);   // tout le spectre (zone de transition du filtre comprise)
+                }
+                std::snprintf (m, sizeof m, "%.1f kHz, sinus %.1f kHz à %.0f dBFS, phase %s : Off %.1f dB, 2× %.1f, 4× %.1f, 8× %.1f dB (8×, au-delà de 20 kHz compris : %.1f)",
+                               t.fs / 1000, t.f0 / 1000, t.lvl, mn ? "minimale" : "linéaire", r[0], r[1], r[2], r[3], full);
+                check (r[3] <= -100 && full <= -90 && r[2] <= -85 && r[1] <= r[0] - 5, m);
             }
-            std::snprintf (m, sizeof m, "%.1f kHz, sinus %.1f kHz à %.0f dBFS : repliement Off %.1f dB, 2× %.1f dB, 4× %.1f dB (sous le fondamental)", t.fs / 1000, t.f0 / 1000, t.lvl, r[0], r[1], r[2]);
-            check (r[1] <= t.lim2 && r[2] <= t.lim4 && r[2] <= r[0] - 15, m);
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -561,8 +568,8 @@ int main()
             CompParams p; p.thr = -20; p.ratio = 4; p.atk = 0.001; p.rel = 0.08;
             auto o = run (fs, x, x, p, false, nullptr, nullptr, 256, at ({ { 256 * 60, [] (CompParams& q) { q.os = 2; } }, { 256 * 150, [] (CompParams& q) { q.os = 1; } } }));
             const double c = std::max (clickDb (o.L, fs, amp), clickDb (o.dL, fs, amp));
-            std::snprintf (m, sizeof m, "suréchantillonnage Off → 4× → 2× (fondu de sortie) : %.1f dB, latence finale %d", c, o.lat);
-            check (c < -70 && o.lat == 69, m);
+            std::snprintf (m, sizeof m, "suréchantillonnage Off → 4× → 2× (fondu enchaîné, sans coupure) : %.1f dB, latence finale %d", c, o.lat);
+            check (c < -90 && o.lat == 85, m);
         }
         {
             auto sc = sine (fs, 100, -3, 1.5);

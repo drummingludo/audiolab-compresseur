@@ -91,7 +91,11 @@ struct CompParams
     double hold       = 0;       // s
     bool   autoRel    = false;   // release automatique (deux constantes de temps)
     double rmsWin     = 0.003;   // s
-    int    os         = 0;       // suréchantillonnage : 0 = Off, 1 = ×2, 2 = ×4
+    int    os         = 0;       // suréchantillonnage : 0 = Off, 1 = ×2, 2 = ×4, 3 = ×8
+    // 3.0.0
+    bool   osMin      = false;   // filtres du suréchantillonnage à phase minimale (latence nulle)
+    double range      = 60;      // réduction de gain maximale (dB) ; 60 = sans limite
+    bool   autoGain   = false;   // compensation automatique à volume égal (hors limiteur ∞)
 };
 
 // Égalité exacte voulue (identité au bit près quand un réglage ne bouge pas), sans avertissement du compilateur
@@ -122,7 +126,7 @@ struct Ramp
 // étage lent pour le release automatique (sortie = max (rapide, lent), dosé par wAuto).
 struct GainStage
 {
-    double g = 0, gs = 0;
+    double g = 0, gs = 0, up = 0;
     int hc = 0;
 
     // Release automatique = deux détecteurs en parallèle (double RC) : le rapide (release ÷ 3) et un lent
@@ -137,6 +141,29 @@ struct GainStage
         gs = aS * gs + (1 - aS) * gr;
         return wAuto > 0 ? g + wAuto * std::max (0.0, gs - g) : g;
     }
+    // Version suréchantillonnée : même calcul, mais le passage attaque ↔ release est daté ENTRE deux échantillons
+    // (la cible est supposée linéaire sur l'intervalle) et le pas est réduit à la fraction restante. Sans cela
+    // l'instant de bascule est arrondi à l'échantillon, ce qui module le gain (repliement de la détection crête).
+    inline double compAA (double gr, double aA, double aR, double aS, int hold, double wAuto)
+    {
+        // intégration par trapèzes : la cible vaut en moyenne (up + gr) / 2 sur l'intervalle
+        if (gr > g)
+        {
+            if (up < g) g += (1 - aA) * 0.5 * (gr - g) * (gr - g) / (gr - up);   // croisement en montant : fraction (gr − g) / (gr − up)
+            else        g += (1 - aA) * (0.5 * (up + gr) - g);
+            hc = hold;
+        }
+        else if (hc > 0) --hc;
+        else if (up > g)
+        {   // croisement en descendant : fin d'attaque sur la fraction t, release sur le reste
+            const double t = (up - g) / (up - gr);
+            g += (1 - aA) * t * 0.5 * (up - g) + (1 - aR) * (1 - t) * 0.5 * (gr - g);
+        }
+        else g += (1 - aR) * (0.5 * (up + gr) - g);
+        up = gr;
+        gs = aS * gs + (1 - aS) * gr;
+        return wAuto > 0 ? g + wAuto * std::max (0.0, gs - g) : g;
+    }
     // limiteur : attaque instantanée (l'anticipation fait la rampe) ; ne descend jamais sous la cible
     inline double lim (double t, double aR, double aS, int hold, double wAuto)
     {
@@ -148,12 +175,57 @@ struct GainStage
     }
 };
 
+// Réduction de gain « anti-repliement » pour la détection crête suréchantillonnée (ADAA du premier ordre).
+// La courbe du compresseur appliquée à |x| est une non-linéarité à coins (redresseur, seuil) : calculée point par
+// point, ses harmoniques se replient et font battre le gain. On prend à la place sa MOYENNE exacte entre deux
+// échantillons successifs, grâce à sa primitive G(x) = ∫ GR(v) dv, connue en forme fermée :
+//   GR moyen = [A(x[n]) − A(x[n−1])] / (x[n] − x[n−1]),  A(x) = signe(x) · G(|x|).
+// Mêmes seuil, pente, knee et Range que gainComputer ; le son ne change pas, seul le repliement baisse.
+struct AdaaGR
+{
+    double thr = 0, sg = 0, kn = 0, rng = 60;         // sg = 1 − 1/ratio ≥ 0
+    double x1 = 1, x2 = 1, xR = 1e300, G2 = 0, Q2 = 0, GR_ = 0, P1 = 0;
+    static constexpr double c = 8.685889638065037;   // 20 / ln 10
+
+    void set (double t, double slope, double k, double r)
+    {
+        if (same (t, thr) && same (-slope, sg) && same (k, kn) && same (r, rng)) return;
+        thr = t; sg = -slope; kn = k; rng = r;
+        const double hk = kn / 2;
+        x1 = std::pow (10.0, (thr - hk) / 20); x2 = std::pow (10.0, (thr + hk) / 20);
+        P1 = 2 * c * c * x1;
+        G2 = kn > 0 ? sg / (2 * kn) * (P (x2) - P1) : 0.0;
+        Q2 = Q (x2);
+        xR = 1e300; GR_ = 0;
+        if (rng < 60 && sg > 0)
+        {
+            double eR;                                 // dépassement (dB) où la réduction atteint le Range
+            if (kn > 0 && rng < sg * hk) eR = std::sqrt (2 * kn * rng / sg) - hk; else eR = rng / sg;
+            xR = std::pow (10.0, (thr + eR) / 20);
+            GR_ = raw (xR);
+        }
+    }
+    inline double P (double x) const { const double u = c * std::log (x) + kn / 2 - thr; return x * (u * u - 2 * c * u + 2 * c * c); }
+    inline double Q (double x) const { return c * (x * std::log (x) - x) - thr * x; }
+    inline double raw (double x) const
+    {
+        if (x <= x1) return 0;
+        if (x < x2) return sg / (2 * kn) * (P (x) - P1);
+        return G2 + sg * (Q (x) - Q2);
+    }
+    inline double A (double d) const
+    {
+        const double x = std::abs (d);
+        const double g = x <= xR ? raw (x) : GR_ + rng * (x - xR);
+        return d < 0 ? -g : g;
+    }
+};
+
 class CompressorCore
 {
 public:
     static constexpr int chunk = 256;            // traitement interne par paquets de 256 échantillons
     static constexpr double xfadeSec = 0.020;    // fondu enchaîné (anticipation, ∞, Mid-Side)
-    static constexpr double osFadeSec = 0.005;   // fondu de sortie au changement de suréchantillonnage
     static constexpr double rampSec = 0.020;     // lissage des réglages
     static constexpr double lookMaxSec = 0.010;  // anticipation maximale (paramètre Lookahead)
 
@@ -162,35 +234,46 @@ public:
     {
         fs = sampleRate; constLat = constantLatency;
         maxLook = std::max (1, jsRound (lookMaxSec * fs));
-        p = initial;
-        osCur = osTarget = std::clamp (initial.os, 0, 2);
 
-        // anneaux du chemin compresseur, dimensionnés pour ×4
-        int sz = 1; while (sz < maxLook * 4 + 8) sz <<= 1;
+        // anneaux du chemin compresseur, dimensionnés pour ×8
+        int sz = 1; while (sz < maxLook * 8 + 8) sz <<= 1;
         hMask = sz - 1;
         for (int c = 0; c < 2; ++c) { xb[c].assign ((size_t) sz, 0.0f); db[c].assign ((size_t) sz, 0.0f); }
         for (auto& b : bank) for (int c = 0; c < 2; ++c) b.gh[c].assign ((size_t) sz, 1.0);
-        for (int s = 0; s < 2; ++s)
-        {
-            upM[s].prepare (s + 1, 2, chunk);
-            upS[s].prepare (s + 1, 2, chunk);
-        }
-        for (int c = 0; c < 2; ++c) { wet1[c].assign ((size_t) chunk, 0.0f); comp[c].assign ((size_t) chunk, 0.0f); }
-        osLatMax = std::max (upM[0].latency(), upM[1].latency());
+        osLatMax = 0;
+        for (int mp = 0; mp < 2; ++mp)
+            for (int s = 0; s < 3; ++s)
+            {
+                upM[mp][s].prepare (s + 1, 2, chunk, mp == 1);
+                upS[mp][s].prepare (s + 1, 2, chunk, mp == 1);
+                osLatMax = std::max (osLatMax, upM[mp][s].latency());
+            }
+        for (int s = 0; s < 3; ++s) upD[s].prepare (s + 1, 2, chunk, true);
+        for (int c = 0; c < 2; ++c) { wet1[c].assign ((size_t) chunk, 0.0f); comp[c].assign ((size_t) chunk, 0.0f); dryF[c].assign ((size_t) chunk, 0.0f); }
 
         // anneaux du chemin de base (sec, limiteur)
         int bs = 1; while (bs < maxLook + osLatMax + 8) bs <<= 1;
         bMask = bs - 1;
-        for (int c = 0; c < 2; ++c) { mainR[c].assign ((size_t) bs, 0.0f); scR[c].assign ((size_t) bs, 0.0f); }
+        for (int c = 0; c < 2; ++c) { mainR[c].assign ((size_t) bs, 0.0f); scR[c].assign ((size_t) bs, 0.0f); mainF[c].assign ((size_t) bs, 0.0f); }
         for (auto& u : unit) u.allocate (maxLook);
 
         xfLen = std::max (1, jsRound (xfadeSec * fs));
-        osFadeLen = std::max (1, jsRound (osFadeSec * fs));
+        setKWeighting();
+        restart (initial);
+    }
+
+    // Remet le moteur à l'état initial pour ces réglages, sans rien allouer (utilisable en temps réel :
+    // c'est ainsi qu'un second moteur est préparé pour changer de suréchantillonnage sans coupure).
+    void restart (const CompParams& initial)
+    {
+        p = initial;
+        osCur = std::clamp (initial.os, 0, 3);
+        osMinCur = initial.osMin && osCur > 0;
 
         // état initial = réglages demandés, sans transition
         cur = desired (p);
         nxt = cur;
-        phase = Phase::idle; osPhase = OsPhase::none;
+        phase = Phase::idle;
         ba = bn = 0; ua = un = 0; needUnit = false;
         for (auto& b : bank)
         {
@@ -199,26 +282,54 @@ public:
         }
         hw = 0; bw = 0;
         for (int c = 0; c < 2; ++c) { std::fill (xb[c].begin(), xb[c].end(), 0.0f); std::fill (db[c].begin(), db[c].end(), 0.0f);
-                                      std::fill (mainR[c].begin(), mainR[c].end(), 0.0f); std::fill (scR[c].begin(), scR[c].end(), 0.0f); }
+                                      std::fill (mainR[c].begin(), mainR[c].end(), 0.0f); std::fill (scR[c].begin(), scR[c].end(), 0.0f);
+                                      std::fill (mainF[c].begin(), mainF[c].end(), 0.0f); }
         scFCur = p.scF; scQCur = p.scQ; scTypeCur = p.scType;
         applyFactor (osCur, true);
         setParams (p);
         resetRamps();
+        for (auto& b : bank) for (int c = 0; c < 2; ++c) { b.sm[c][0] = b.sm[c][1] = mkLinH; std::fill (b.gh[c].begin(), b.gh[c].end(), mkLinH); }
         if (cur.lim) unit[ua].reset (cur.W, cur.useTp, nullptr);
         latNow = osLat + cur.A;
         grNow.store (0); grMax.store (0);
+        for (auto& k : kw) k.clear();
+        msDry = msWet = 0; agDb = agTarget = 0; agCount = 0;
     }
+
+    // Reprend l'état de la dynamique d'un autre moteur (réduction en cours, énergies RMS, auto-gain) :
+    // le nouveau moteur démarre là où l'ancien en est, il ne « ré-attaque » pas.
+    void adoptState (const CompressorCore& o)
+    {
+        const Bank& sb = o.bank[o.ba];
+        for (auto& b : bank)
+        {
+            for (int c = 0; c < 2; ++c)
+            {
+                b.st[c].g = sb.st[c].g; b.st[c].gs = sb.st[c].gs;
+                b.st[c].hc = (int) ((long) sb.st[c].hc * factor / std::max (1, o.factor));
+                b.acc[c] = sb.acc[c];
+                b.sm[c][0] = b.sm[c][1] = sb.sm[c][1] > 0 && o.factor > 1 ? sb.sm[c][1] : std::pow (10.0, -sb.st[c].g / 20) * mkLinH;
+            }
+            b.accLink = sb.accLink;
+        }
+        if (cur.lim && o.cur.lim) for (int c = 0; c < 2; ++c) unit[ua].st[c] = o.unit[o.ua].st[c];
+        msDry = o.msDry; msWet = o.msWet; agDb = o.agDb; agTarget = o.agTarget;
+        for (int i = 0; i < 8; ++i) kw[i] = o.kw[i];
+    }
+    int oversamplingStages() const { return osCur; }
+    bool oversamplingMinPhase() const { return osMinCur; }
+    float autoGainDb() const { return (float) agDb; }
 
     // ── Réglages (appelé à chaque bloc) ───────────────────────────────────
     void setParams (const CompParams& np)
     {
         p = np;
-        osTarget = std::clamp (p.os, 0, 2);
         updateCoefs();
         // cibles des rampes (rythme haut et rythme de base)
         const double s = 1.0 / compRatio (p.ratio) - 1.0;
         rH.thr.set (p.thr); rH.slope.set (s); rH.knee.set (p.knee); rH.mk.set (p.mk); rH.link.set (clamp01 (p.link));
         rH.autoW.set (p.autoRel ? 1.0 : 0.0);
+        rH.range.set (std::clamp (p.range, 0.0, 60.0));
         rB.thr.set (p.thr); rB.mk.set (p.mk); rB.link.set (clamp01 (p.link)); rB.autoW.set (p.autoRel ? 1.0 : 0.0);
     }
 
@@ -239,10 +350,10 @@ public:
     int latency() const          { return latNow; }   // latence à annoncer à l'hôte (échantillons)
     int lookaheadSamples() const { return std::min (maxLook, jsRound (p.look * fs)); }
     int maxLookahead() const     { return maxLook; }
-    int oversamplingLatency (int stages) const { return stages <= 0 ? 0 : upM[std::min (stages, 2) - 1].latency(); }
+    int oversamplingLatency (int stages, bool minPhase = false) const { return stages <= 0 ? 0 : upM[minPhase ? 1 : 0][std::min (stages, 3) - 1].latency(); }
     bool limiterActive() const   { return cur.lim; }
     bool truePeakActive() const  { return cur.lim && cur.useTp; }
-    bool inTransition() const    { return phase != Phase::idle || osPhase != OsPhase::none; }
+    bool inTransition() const    { return phase != Phase::idle; }
     int tpMinLook() const        { return jsRound (0.001 * fs); }   // anticipation minimale pour la crête vraie (1 ms)
 
     // Réduction de gain courante (dB, positive) et crête depuis la dernière lecture — pour l'affichage.
@@ -295,6 +406,8 @@ private:
         double accLink = 0, acc[2] { 0, 0 };
         bool ms = false;
         std::vector<double> gh[2];   // historique des gains (make-up compris) pour le gain retardé
+        double dp[2] { 0, 0 }, Ap[2] { 0, 0 };     // ADAA : échantillon de détection précédent et sa primitive
+        double sm[2][2] { { 1, 1 }, { 1, 1 } };   // suréchantillonné : gain adouci (deux pôles) contre le repliement
     };
 
     // ── Unité limiteur (rythme de base) ──────────────────────────────────
@@ -390,7 +503,7 @@ private:
     };
 
     // ── Rampes de lissage ────────────────────────────────────────────────
-    struct Ramps { Ramp thr, slope, knee, mk, link, autoW, scW; };
+    struct Ramps { Ramp thr, slope, knee, mk, link, autoW, scW, range; };
 
     void resetRamps()
     {
@@ -399,6 +512,7 @@ private:
         {
             r->thr.reset (p.thr); r->slope.reset (s); r->knee.reset (p.knee); r->mk.reset (p.mk);
             r->link.reset (clamp01 (p.link)); r->autoW.reset (p.autoRel ? 1.0 : 0.0); r->scW.reset (0.0);
+            r->range.reset (std::clamp (p.range, 0.0, 60.0));
         }
         mkLinH = mkLinB = std::pow (10.0, p.mk / 20.0);
         thrLinB = std::pow (10.0, p.thr / 20.0);
@@ -413,6 +527,8 @@ private:
         aS = std::exp (-1.0 / (std::max (0.001, p.rel * 3) * fh));       // × 3 après une compression prolongée
         rmsCoef = std::exp (-1.0 / (std::max (0.0005, p.rmsWin) * fh));
         holdH = std::max (0, jsRound (p.hold * fh));
+        // suréchantillonné : le gain passe par deux pôles à gSmHz (inaudible, retire l'extrême aigu du gain qui se replierait)
+        gSm = (factor > 1 && gSmHz > 0) ? 1 - std::exp (-2 * kPi * gSmHz / fh) : 0.0;
         // rythme de base (limiteur)
         aRB = std::exp (-1.0 / (std::max (0.001, p.rel) * fs));
         aRfastB = std::exp (-1.0 / (std::max (0.001, p.rel / 3) * fs));
@@ -420,27 +536,38 @@ private:
         holdB = std::max (0, jsRound (p.hold * fs));
     }
 
-    // Choisit le facteur de suréchantillonnage (hors lecture ou pendant le silence du fondu)
-    void applyFactor (int stages, bool initial)
+    // Fixe le facteur de suréchantillonnage (à la préparation du moteur uniquement)
+    void applyFactor (int stages, bool)
     {
-        const int oldF = factor;
         osCur = stages;
         factor = 1 << stages;
-        osLat = stages == 0 ? 0 : upM[stages - 1].latency();
-        if (stages > 0) { upM[stages - 1].reset(); upS[stages - 1].reset(); }
+        osLat = stages == 0 ? 0 : M().latency();
+        if (stages > 0) { M().reset(); S().reset(); upD[stages - 1].reset(); }
         for (int c = 0; c < 2; ++c) { std::fill (xb[c].begin(), xb[c].end(), 0.0f); std::fill (db[c].begin(), db[c].end(), 0.0f); }
-        for (auto& b : bank) for (int c = 0; c < 2; ++c)
-        {
-            std::fill (b.gh[c].begin(), b.gh[c].end(), 1.0);
-            if (! initial && oldF > 0) b.st[c].hc = (int) ((long) b.st[c].hc * factor / oldF);
-        }
+        for (auto& b : bank) for (int c = 0; c < 2; ++c) std::fill (b.gh[c].begin(), b.gh[c].end(), 1.0);
         const int rl = std::max (1, jsRound (rampSec * fs * factor));
-        for (Ramp* r : { &rH.thr, &rH.slope, &rH.knee, &rH.mk, &rH.link, &rH.autoW, &rH.scW }) r->setLength (rl, fs * factor);
+        for (Ramp* r : { &rH.thr, &rH.slope, &rH.knee, &rH.mk, &rH.link, &rH.autoW, &rH.scW, &rH.range }) r->setLength (rl, fs * factor);
         const int rb = std::max (1, jsRound (rampSec * fs));
-        for (Ramp* r : { &rB.thr, &rB.slope, &rB.knee, &rB.mk, &rB.link, &rB.autoW, &rB.scW }) r->setLength (rb, fs);
+        for (Ramp* r : { &rB.thr, &rB.slope, &rB.knee, &rB.mk, &rB.link, &rB.autoW, &rB.scW, &rB.range }) r->setLength (rb, fs);
         for (int c = 0; c < 2; ++c) { scH[c].clear(); scB[c].clear(); }
         setScFilters();
         updateCoefs();
+    }
+    os::Oversampler& M() { return upM[osMinCur ? 1 : 0][osCur - 1]; }
+    os::Oversampler& S() { return upS[osMinCur ? 1 : 0][osCur - 1]; }
+
+    // Pondération K (ITU-R BS.1770) pour l'auto-gain : étagère aiguë puis passe-haut, recalculés pour fs
+    void setKWeighting()
+    {
+        double b0, b1, b2, a1, a2;
+        { const double f0 = 1681.974450955533, G = 3.999843853973347, Q = 0.7071752369554196;
+          const double K = std::tan (kPi * f0 / fs), Vh = std::pow (10.0, G / 20), Vb = std::pow (Vh, 0.4996667741545416), a0 = 1 + K / Q + K * K;
+          b0 = (Vh + Vb * K / Q + K * K) / a0; b1 = 2 * (K * K - Vh) / a0; b2 = (Vh - Vb * K / Q + K * K) / a0; a1 = 2 * (K * K - 1) / a0; a2 = (1 - K / Q + K * K) / a0;
+          for (int i = 0; i < 4; ++i) { kw[i].b0 = b0; kw[i].b1 = b1; kw[i].b2 = b2; kw[i].a1 = a1; kw[i].a2 = a2; } }
+        { const double f0 = 38.13547087602444, Q = 0.5003270373238773, K = std::tan (kPi * f0 / fs), a0 = 1 + K / Q + K * K;
+          for (int i = 4; i < 8; ++i) { kw[i].b0 = 1; kw[i].b1 = -2; kw[i].b2 = 1; kw[i].a1 = 2 * (K * K - 1) / a0; kw[i].a2 = (1 - K / Q + K * K) / a0; } }
+        agMs = std::exp (-1.0 / (1.5 * fs));      // intégration du volume : 1,5 s
+        agSm = std::exp (-1.0 / (0.25 * fs));     // lissage du gain : 250 ms
     }
 
     void setScFilters()
@@ -480,6 +607,7 @@ private:
         // (L² + R²) / 2 = M² + S² : l'énergie moyenne par voie est divisée par 2 en Mid-Side
         dst.accLink = src.ms == ms ? src.accLink : (ms ? src.accLink * 0.5 : src.accLink * 2);
         dst.acc[0] = dst.acc[1] = dst.accLink;
+        for (int c = 0; c < 2; ++c) dst.sm[c][0] = dst.sm[c][1] = 0.5 * (src.sm[0][1] + src.sm[1][1]);
         for (int c = 0; c < 2; ++c)
             for (size_t i = 0; i < dst.gh[c].size(); ++i) dst.gh[c][i] = 0.5 * (src.gh[0][i] + src.gh[1][i]);
     }
@@ -497,8 +625,10 @@ private:
     static inline double toDb (double lvl) { return lvl > 1e-6 ? 20 * std::log10 (lvl) : -120; }
 
     // Une banque traite un échantillon (rythme haut) : écrit les gains dans son historique, renvoie la GR max
-    inline double runBank (Bank& b, double dl, double dr, double thr, double s, double kn, double lk, double mk, double wA, int w)
+    inline double runBank (Bank& b, double dl, double dr, double thr, double s, double kn, double lk, double mk, double wA, int w, double rng)
     {
+        // Range : réduction visée plafonnée (60 = sans limite, calcul inchangé)
+        auto gc = [rng] (double d, double t, double sl, double k) { const double g = gainComputer (d, t, sl, k); return (rng < 60 && g > rng) ? rng : g; };
         double d0 = dl, d1 = dr;
         if (b.ms) { d0 = (dl + dr) * 0.5; d1 = (dl - dr) * 0.5; }
         double lvl;
@@ -511,26 +641,45 @@ private:
             lvl = std::sqrt (b.accLink);
         }
         else lvl = std::max (std::abs (d0), std::abs (d1));
-        const double dbLink = toDb (lvl);
         const double aRel = p.autoRel ? aRfast : aR;
+        // détection crête suréchantillonnée : réduction moyenne exacte entre deux échantillons (anti-repliement)
+        const bool aa = factor > 1 && ! p.rms;
+        double grA[2] = { 0, 0 };
+        if (aa)
+        {
+            adaa.set (thr, s, kn, rng);
+            const bool keep = ! adaaDirty;
+            const double d[2] = { d0, d1 };
+            for (int c = 0; c < 2; ++c)
+            {
+                const double An = adaa.A (d[c]), Ao = keep ? b.Ap[c] : adaa.A (b.dp[c]), dx = d[c] - b.dp[c];
+                grA[c] = std::abs (dx) > 1e-7 ? (An - Ao) / dx : gc (toDb (std::abs (0.5 * (d[c] + b.dp[c]))), thr, s, kn);
+                if (grA[c] < 0) grA[c] = 0;
+                b.dp[c] = d[c]; b.Ap[c] = An;
+            }
+        }
+        const double dbLink = aa ? 0.0 : toDb (lvl);
+        const double grLink = aa ? std::max (grA[0], grA[1]) : gc (dbLink, thr, s, kn);
         if (lk >= 1)
         {
-            const double G = b.st[0].comp (gainComputer (dbLink, thr, s, kn), aA, aRel, aS, holdH, wA);
+            const double G = aa ? b.st[0].compAA (grLink, aA, aRel, aS, holdH, wA) : b.st[0].comp (grLink, aA, aRel, aS, holdH, wA);
             b.st[1] = b.st[0];
-            const double lin = std::pow (10.0, -G / 20) * mk;
+            double lin = std::pow (10.0, -G / 20) * mk;
+            if (gSm > 0) { b.sm[0][0] += gSm * (lin - b.sm[0][0]); b.sm[0][1] += gSm * (b.sm[0][0] - b.sm[0][1]); lin = b.sm[0][1]; b.sm[1][0] = b.sm[0][0]; b.sm[1][1] = lin; }
             b.gh[0][(size_t) w] = lin; b.gh[1][(size_t) w] = lin;
             return G;
         }
         // stereo link < 100 % : mélange des réductions visées (dB) liée et propre à chaque voie
         // (à 50 %, une voie silencieuse reçoit la moitié de la réduction de l'autre)
-        const double grLink = gainComputer (dbLink, thr, s, kn);
         double gmax = 0;
         for (int c = 0; c < 2; ++c)
         {
             const double own = p.rms ? std::sqrt (b.acc[c]) : std::abs (c == 0 ? d0 : d1);
-            const double grv = lk * grLink + (1 - lk) * gainComputer (toDb (own), thr, s, kn);
-            const double G = b.st[c].comp (grv, aA, aRel, aS, holdH, wA);
-            b.gh[c][(size_t) w] = std::pow (10.0, -G / 20) * mk;
+            const double grv = lk * grLink + (1 - lk) * (aa ? grA[c] : gc (toDb (own), thr, s, kn));
+            const double G = aa ? b.st[c].compAA (grv, aA, aRel, aS, holdH, wA) : b.st[c].comp (grv, aA, aRel, aS, holdH, wA);
+            double lin = std::pow (10.0, -G / 20) * mk;
+            if (gSm > 0) { b.sm[c][0] += gSm * (lin - b.sm[c][0]); b.sm[c][1] += gSm * (b.sm[c][0] - b.sm[c][1]); lin = b.sm[c][1]; }
+            b.gh[c][(size_t) w] = lin;
             gmax = std::max (gmax, G);
         }
         return gmax;
@@ -574,9 +723,15 @@ private:
         if (osCur > 0)
         {
             const float* in[2] = { L, R };
-            auto* up = upM[osCur - 1].upsample (in, m);
+            auto* up = M().upsample (in, m);
             hi[0] = up[0]; hi[1] = up[1];
-            if (scOn) { const float* si[2] = { sL, sR }; auto* us = upS[osCur - 1].upsample (si, m); hs[0] = us[0]; hs[1] = us[1]; }
+            if (scOn) { const float* si[2] = { sL, sR }; auto* us = S().upsample (si, m); hs[0] = us[0]; hs[1] = us[1]; }
+            if (osMinCur)
+            {   // phase minimale : le sec passe par les mêmes filtres (aucun peigne au Dry/Wet)
+                upD[osCur - 1].upsample (in, m);
+                float* dout[2] = { dryF[0].data(), dryF[1].data() };
+                upD[osCur - 1].downsample (dout, m);
+            }
         }
         else
         {
@@ -585,6 +740,9 @@ private:
             if (scOn) { hs[0] = sL; hs[1] = sR; }
         }
         const double xfDen = (double) xfLen * F;
+        // Phase linéaire : on ne suréchantillonne que la DIFFÉRENCE (traité − sec) ; le sec est rajouté au rythme
+        // de base. Quand rien ne compresse la différence est nulle : sortie identique à l'entrée, au bit près.
+        const bool delta = osCur > 0 && ! osMinCur && ! p.scListen;
         double grComp = 0;
         for (int j = 0; j < mh; ++j)
         {
@@ -602,12 +760,13 @@ private:
             xb[0][(size_t) w] = hi[0][j]; xb[1][(size_t) w] = hi[1][j];
             db[0][(size_t) w] = (float) dl; db[1][(size_t) w] = (float) dr;
 
-            const double thr = rH.thr.next(), s = rH.slope.next(), kn = rH.knee.next(), lk = rH.link.next(), wA = rH.autoW.next();
+            const double thr = rH.thr.next(), s = rH.slope.next(), kn = rH.knee.next(), lk = rH.link.next(), wA = rH.autoW.next(), rng = rH.range.next();
             if (rH.mk.active()) mkLinH = std::pow (10.0, rH.mk.next() / 20.0);   // fin de rampe : exactement la cible
             const double mk = mkLinH;
 
-            const double G = runBank (bank[ba], dl, dr, thr, s, kn, lk, mk, wA, w);
-            if (dualBank) runBank (bank[bn], dl, dr, thr, s, kn, lk, mk, wA, w);
+            adaaDirty = ! (same (thr, adaa.thr) && same (-s, adaa.sg) && same (kn, adaa.kn) && same (rng, adaa.rng));
+            const double G = runBank (bank[ba], dl, dr, thr, s, kn, lk, mk, wA, w, rng);
+            if (dualBank) runBank (bank[bn], dl, dr, thr, s, kn, lk, mk, wA, w, rng);
             if (G > grComp) grComp = G;
 
             double yl, yr;
@@ -623,10 +782,12 @@ private:
             else
             {
                 renderComp (bank[ba], C.A * F, C.B * F, w, yl, yr);
+                if (delta) { const size_t r = (size_t) ((w - C.A * F) & hMask); yl -= xb[0][r]; yr -= xb[1][r]; }
                 if (xf && (newBank || N.A != C.A || N.B != C.B))
                 {
                     double zl, zr;
                     renderComp (bank[newBank ? bn : ba], N.A * F, N.B * F, w, zl, zr);
+                    if (delta) { const size_t r = (size_t) ((w - N.A * F) & hMask); zl -= xb[0][r]; zr -= xb[1][r]; }
                     const double t = smooth ((xfPos * F + j + 1) / xfDen);
                     yl = (1 - t) * yl + t * zl; yr = (1 - t) * yr + t * zr;
                 }
@@ -634,17 +795,18 @@ private:
             hi[0][j] = (float) yl; hi[1][j] = (float) yr;
             hw = (w + 1) & hMask;
         }
-        if (osCur > 0) { float* out[2] = { comp[0].data(), comp[1].data() }; upM[osCur - 1].downsample (out, m); }
+        if (osCur > 0) { float* out[2] = { comp[0].data(), comp[1].data() }; M().downsample (out, m); }
         else { std::copy (hi[0], hi[0] + m, comp[0].data()); std::copy (hi[1], hi[1] + m, comp[1].data()); }
 
         // ── 2. chemin de base : sec recalé, limiteur, mélange ──
         if (uC != nullptr) uC->minGain = 1;
         if (uN != nullptr) uN->minGain = 1;
-        double gO = 1;
+        const bool agOn = p.autoGain || agDb != 0.0;
         for (int i = 0; i < m; ++i)
         {
             const int w = bw;
             mainR[0][(size_t) w] = L[i]; mainR[1][(size_t) w] = R[i];
+            if (osMinCur) { mainF[0][(size_t) w] = dryF[0][(size_t) i]; mainF[1][(size_t) w] = dryF[1][(size_t) i]; }
             scR[0][(size_t) w] = scOn ? sL[i] : L[i]; scR[1][(size_t) w] = scOn ? sR[i] : R[i];
             const double lk = rB.link.next(), wA = rB.autoW.next(), ws = rB.scW.next();
             if (rB.mk.active()) mkLinB = std::pow (10.0, rB.mk.next() / 20.0);
@@ -661,19 +823,19 @@ private:
             if (uC != nullptr) uC->step (det, thrLinB, lk, mk, aRl, aSB, holdB, wA);
             if (uN != nullptr && uN != uC) uN->step (det, thrLinB, lk, mk, aRl, aSB, holdB, wA);
 
-            // sortie de fondu du suréchantillonnage
-            if (osPhase == OsPhase::fadeOut) gO = 1.0 - smooth ((double) (osPos + i + 1) / osFadeLen);
-            else if (osPhase == OsPhase::mute) gO = 0;
-            else if (osPhase == OsPhase::fadeIn) gO = smooth ((double) (osPos + i + 1) / osFadeLen);
-
             const double t = xf ? smooth ((double) (xfPos + i + 1) / xfLen) : 0.0;
-            // sec
-            const size_t rc = (size_t) ((w - osLat - C.A) & bMask);
-            double sl = mainR[0][rc], sr = mainR[1][rc];
-            if (xf && N.A != C.A)
+            // sec (en phase minimale, hors limiteur : le sec filtré comme le traité)
+            auto dryOf = [&] (const Config& K, double& a, double& b)
             {
-                const size_t rn = (size_t) ((w - osLat - N.A) & bMask);
-                sl += t * (mainR[0][rn] - sl); sr += t * (mainR[1][rn] - sr);
+                const size_t r = (size_t) ((w - osLat - K.A) & bMask);
+                if (osMinCur && ! K.lim) { a = mainF[0][r]; b = mainF[1][r]; } else { a = mainR[0][r]; b = mainR[1][r]; }
+            };
+            double sl, sr;
+            dryOf (C, sl, sr);
+            if (xf && (N.A != C.A || (osMinCur && N.lim != C.lim)))
+            {
+                double nl, nr; dryOf (N, nl, nr);
+                sl += t * (nl - sl); sr += t * (nr - sr);
             }
             // traité
             double yl, yr;
@@ -682,7 +844,7 @@ private:
             {
                 auto wetOf = [&] (const Config& K, const LimUnit* u, double& a, double& b)
                 {
-                    if (! K.lim) { a = comp[0][(size_t) i]; b = comp[1][(size_t) i]; return; }
+                    if (! K.lim) { a = comp[0][(size_t) i]; b = comp[1][(size_t) i]; if (delta) { a += sl; b += sr; } return; }
                     const size_t r = (size_t) ((w - osLat - K.A) & bMask);
                     a = mainR[0][r] * u->gainAt (0, K.B); b = mainR[1][r] * u->gainAt (1, K.B);
                 };
@@ -694,16 +856,33 @@ private:
                     yl = (1 - t) * yl + t * zl; yr = (1 - t) * yr + t * zr;
                 }
             }
-            oL[i] = (float) (yl * gO); oR[i] = (float) (yr * gO);
-            dL[i] = (float) (sl * gO); dR[i] = (float) (sr * gO);
+            // auto-gain : compare le volume (pondération K, 1,5 s) du sec et du traité sans make-up, hors limiteur
+            if (agOn && ! p.scListen)
+            {
+                const bool limNow = C.lim || (xf && N.lim);
+                const double wl = yl / mk, wr = yr / mk;
+                const double dkl = kw[4].run (kw[0].run (sl)), dkr = kw[5].run (kw[1].run (sr));
+                const double wkl = kw[6].run (kw[2].run (wl)), wkr = kw[7].run (kw[3].run (wr));
+                msDry = agMs * msDry + (1 - agMs) * (dkl * dkl + dkr * dkr);
+                msWet = agMs * msWet + (1 - agMs) * (wkl * wkl + wkr * wkr);
+                if ((agCount++ & 63) == 0)
+                {
+                    if (! p.autoGain || limNow) agTarget = 0;
+                    else if (msDry > 1e-8 && msWet > 1e-12) agTarget = std::clamp (10 * std::log10 (msDry / msWet), -6.0, 36.0);
+                }
+                agDb = agTarget + agSm * (agDb - agTarget);
+                if (! p.autoGain && std::abs (agDb) < 1e-4) agDb = 0;
+                const double ag = std::exp (agDb * 0.11512925464970229);
+                yl *= ag; yr *= ag;
+            }
+            oL[i] = (float) yl; oR[i] = (float) yr;
+            dL[i] = (float) sl; dR[i] = (float) sr;
             bw = (w + 1) & bMask;
         }
 
         // ── 3. compteurs des transitions ──
         if (phase == Phase::warm) warmLeft -= m;
         else if (phase == Phase::xfade) xfPos += m;
-        if (osPhase == OsPhase::fadeOut || osPhase == OsPhase::fadeIn) osPos += m;
-        else if (osPhase == OsPhase::mute) osMute -= m;
 
         // ── 4. mesure ──
         double gr = grComp;
@@ -716,19 +895,6 @@ private:
     // ── Transitions (au début de chaque paquet) ──────────────────────────
     void advanceStateMachine()
     {
-        // suréchantillonnage : fondu de sortie, changement pendant le silence, remplissage, fondu d'entrée
-        if (osPhase == OsPhase::fadeOut && osPos >= osFadeLen)
-        {
-            applyFactor (osTarget, false);
-            if (cur.lim) unit[ua].reset (cur.W, cur.useTp, &unit[ua]);
-            latNow = osLat + cur.A;
-            osPhase = OsPhase::mute;
-            osMute = cur.A + osLat + (cur.lim ? unit[ua].warmLength (cur.B) : 0) + 64;
-        }
-        if (osPhase == OsPhase::mute && osMute <= 0) { osPhase = OsPhase::fadeIn; osPos = 0; }
-        if (osPhase == OsPhase::fadeIn && osPos >= osFadeLen) osPhase = OsPhase::none;
-        if (osPhase != OsPhase::none) return;
-
         if (phase == Phase::warm && warmLeft <= 0) { phase = Phase::xfade; xfPos = 0; latNow = osLat + nxt.A; }
         if (phase == Phase::xfade && xfPos >= xfLen)
         {
@@ -739,7 +905,6 @@ private:
         }
         if (phase != Phase::idle) return;
 
-        if (osTarget != osCur) { osPhase = OsPhase::fadeOut; osPos = 0; return; }
         const Config d = desired (p);
         if (d == cur) return;
         nxt = d;
@@ -762,17 +927,22 @@ private:
     static int jsRound (double x) { return (int) std::floor (x + 0.5); } // Math.round()
 
     enum class Phase { idle, warm, xfade };
-    enum class OsPhase { none, fadeOut, mute, fadeIn };
 
     double fs = 48000;
     bool constLat = false;
     CompParams p;
     int maxLook = 480, osLatMax = 76;
-    int osCur = 0, osTarget = 0, factor = 1, osLat = 0;
+    int osCur = 0, factor = 1, osLat = 0;
+    bool osMinCur = false;
     int latNow = 0;
 
     // coefficients
-    double aA = 0, aR = 0, aRfast = 0, aS = 0, rmsCoef = 0;
+    double aA = 0, aR = 0, aRfast = 0, aS = 0, rmsCoef = 0, gSm = 0;
+    AdaaGR adaa;
+    bool adaaDirty = false;
+public:
+    double gSmHz = 0;   // adoucissement du gain suréchantillonné : essayé, sans effet mesurable sur le repliement, laissé à 0
+private:
     double aRB = 0, aRfastB = 0, aSB = 0;
     int holdH = 0, holdB = 0;
     Ramps rH, rB;
@@ -784,14 +954,14 @@ private:
     double scFCur = 1000, scQCur = 0.7;
 
     // chemin compresseur
-    os::Oversampler upM[2], upS[2];
-    std::vector<float> xb[2], db[2], wet1[2], comp[2];
+    os::Oversampler upM[2][3], upS[2][3], upD[3];   // [phase linéaire / minimale][×2, ×4, ×8] ; upD : sec en phase minimale
+    std::vector<float> xb[2], db[2], wet1[2], comp[2], dryF[2];
     int hMask = 0, hw = 0;
     Bank bank[2];
     int ba = 0, bn = 0;
 
     // chemin de base
-    std::vector<float> mainR[2], scR[2];
+    std::vector<float> mainR[2], scR[2], mainF[2];
     int bMask = 0, bw = 0;
     LimUnit unit[2];
     int ua = 0, un = 0;
@@ -801,9 +971,103 @@ private:
     Config cur, nxt;
     Phase phase = Phase::idle;
     int warmLeft = 0, xfPos = 0, xfLen = 960;
-    OsPhase osPhase = OsPhase::none;
-    int osPos = 0, osFadeLen = 240, osMute = 0;
+    // auto-gain
+    Biquad kw[8];
+    double msDry = 0, msWet = 0, agDb = 0, agTarget = 0, agMs = 0, agSm = 0;
+    unsigned agCount = 0;
 
     std::atomic<float> grNow { 0 }, grMax { 0 };
+};
+// ─────────────────────────────────────────────────────────────────────────────
+// Moteur complet = deux CompressorCore. Un seul travaille en temps normal. Quand le suréchantillonnage
+// (facteur ou type de filtre) change, le second est remis à zéro avec le nouveau réglage, reprend l'état
+// de la dynamique du premier, tourne en parallèle le temps de se remplir (50 ms + sa latence), puis un
+// fondu enchaîné de 20 ms passe de l'un à l'autre, traité et sec ensemble : aucune coupure, aucun clic.
+// La latence annoncée change au début du fondu.
+class CompressorEngine
+{
+public:
+    void prepare (double sampleRate, bool constantLatency, const CompParams& initial)
+    {
+        fs = sampleRate; p = initial;
+        core[0].prepare (fs, constantLatency, initial);
+        core[1].prepare (fs, constantLatency, initial);
+        act = 0; st = State::idle;
+        cfg[0] = cfg[1] = want = wanted (initial);
+        xfLen = std::max (1, (int) std::floor (CompressorCore::xfadeSec * fs + 0.5));
+        for (auto& v : tmp) v.assign ((size_t) CompressorCore::chunk, 0.0f);
+    }
+    void setParams (const CompParams& np)
+    {
+        p = np; want = wanted (np);
+        core[act].setParams (with (np, cfg[act]));
+        if (st != State::idle) core[1 - act].setParams (with (np, cfg[1 - act]));
+    }
+    void process (const float* L, const float* R, const float* sL, const float* sR,
+                  float* oL, float* oR, float* dL, float* dR, int n)
+    {
+        for (int off = 0; off < n; off += CompressorCore::chunk)
+        {
+            const int m = std::min (CompressorCore::chunk, n - off);
+            const int o = 1 - act;
+            if (st == State::idle && ! (want == cfg[act]))
+            {
+                cfg[o] = want;
+                core[o].restart (with (p, want));
+                core[o].adoptState (core[act]);
+                st = State::warm;
+                warmLeft = core[o].maxLookahead() + core[o].latency() + (int) (0.05 * fs);
+            }
+            else if (st == State::warm && warmLeft <= 0) { st = State::xfade; xfPos = 0; }
+
+            const float* a = L + off; const float* b = R + off;
+            const float* sa = sL != nullptr ? sL + off : nullptr; const float* sb = sR != nullptr ? sR + off : nullptr;
+            core[act].process (a, b, sa, sb, oL + off, oR + off, dL + off, dR + off, m);
+            if (st != State::idle)
+            {
+                core[o].process (a, b, sa, sb, tmp[0].data(), tmp[1].data(), tmp[2].data(), tmp[3].data(), m);
+                if (st == State::warm) warmLeft -= m;
+                else
+                {
+                    float* dst[4] = { oL + off, oR + off, dL + off, dR + off };
+                    for (int i = 0; i < m; ++i)
+                    {
+                        double u = std::min (1.0, (double) (xfPos + i + 1) / xfLen); u = u * u * (3 - 2 * u);
+                        for (int k = 0; k < 4; ++k) dst[k][i] = (float) (dst[k][i] + u * ((double) tmp[(size_t) k][(size_t) i] - dst[k][i]));
+                    }
+                    xfPos += m;
+                    if (xfPos >= xfLen) { act = o; st = State::idle; }
+                }
+            }
+        }
+    }
+
+    int latency() const          { return st == State::xfade ? core[1 - act].latency() : core[act].latency(); }
+    int lookaheadSamples() const { return core[act].lookaheadSamples(); }
+    int maxLookahead() const     { return core[act].maxLookahead(); }
+    int oversamplingLatency (int stages, bool minPhase = false) const { return core[act].oversamplingLatency (stages, minPhase); }
+    bool limiterActive() const   { return core[act].limiterActive(); }
+    bool truePeakActive() const  { return core[act].truePeakActive(); }
+    bool inTransition() const    { return st != State::idle || core[act].inTransition(); }
+    int tpMinLook() const        { return core[act].tpMinLook(); }
+    float getGR() const          { return core[act].getGR(); }
+    float takeGRMax()            { return std::max (core[0].takeGRMax(), core[1].takeGRMax()); }
+    float autoGainDb() const     { return core[act].autoGainDb(); }
+    static double curve (double di, double thr, double ratioKnob, double knee, double mk) { return CompressorCore::curve (di, thr, ratioKnob, knee, mk); }
+    static double compRatio (double knob) { return CompressorCore::compRatio (knob); }
+
+private:
+    struct Cfg { int os = 0; bool mn = false; bool operator== (const Cfg& o) const { return os == o.os && mn == o.mn; } };
+    static Cfg wanted (const CompParams& q) { Cfg c; c.os = std::clamp (q.os, 0, 3); c.mn = q.osMin && c.os > 0; return c; }
+    static CompParams with (CompParams q, const Cfg& c) { q.os = c.os; q.osMin = c.mn; return q; }
+    enum class State { idle, warm, xfade };
+
+    double fs = 48000;
+    CompParams p;
+    CompressorCore core[2];
+    Cfg cfg[2], want;
+    int act = 0, warmLeft = 0, xfPos = 0, xfLen = 960;
+    State st = State::idle;
+    std::vector<float> tmp[4];
 };
 } // namespace audiolab
