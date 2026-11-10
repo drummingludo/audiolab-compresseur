@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <string>
 #include <vector>
 
 using namespace audiolab;
@@ -23,12 +24,14 @@ static double dB (double x) { return 20 * std::log10 (std::max (1e-15, x)); }
 struct Out { std::vector<float> L, R, dL, dR; int lat = 0; };
 using Change = std::function<void (int pos, CompParams&)>;
 
+static double lastRunMs = 0;   // durée du seul traitement (hors préparation) du dernier run()
 static Out run (double fs, const std::vector<float>& L, const std::vector<float>& R, CompParams p, bool constLat = false,
                 const std::vector<float>* sL = nullptr, const std::vector<float>* sR = nullptr, int block = 256, Change ch = {})
 {
     CompressorEngine c; c.prepare (fs, constLat, p);
     const int n = (int) L.size();
     Out o; o.L.resize ((size_t) n); o.R.resize ((size_t) n); o.dL.resize ((size_t) n); o.dR.resize ((size_t) n);
+    const auto t0 = std::chrono::steady_clock::now();
     for (int off = 0; off < n; off += block)
     {
         const int m = std::min (block, n - off);
@@ -37,6 +40,7 @@ static Out run (double fs, const std::vector<float>& L, const std::vector<float>
                    o.L.data() + off, o.R.data() + off, o.dL.data() + off, o.dR.data() + off, m);
         o.lat = c.latency();
     }
+    lastRunMs = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count();
     return o;
 }
 
@@ -601,18 +605,74 @@ int main()
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    std::printf ("\n12) Automation de CHAQUE réglage sans clic (3.0.0) : résidu au-dessus de 3 kHz sous −90 dB\n"
+                 "    (sinus 220 Hz, détecteur propre : RMS 50 ms, attaque 10 ms, release 100 ms ; aller à 0,5 s, retour à 1 s)\n");
+    {
+        const double fs = 48000, amp = 0.5;
+        auto x = sine (fs, 220, -6, 1.6);
+        auto sc = sine (fs, 220, -12, 1.6, 1.0);
+        struct E { const char* name; std::function<void (CompParams&)> go, back; bool limiter; };
+        auto S = [] (std::function<void (CompParams&)> a, std::function<void (CompParams&)> b) { return std::make_pair (a, b); };
+        std::vector<E> ev = {
+            { "Threshold −20 → −40 dB", [] (CompParams& q) { q.thr = -40; }, [] (CompParams& q) { q.thr = -20; }, false },
+            { "Ratio 4 → 12", [] (CompParams& q) { q.ratio = 12; }, [] (CompParams& q) { q.ratio = 4; }, false },
+            { "Ratio 4 → ∞ (limiteur)", [] (CompParams& q) { q.ratio = 20; }, [] (CompParams& q) { q.ratio = 4; }, false },
+            { "Knee 6 → 20 dB", [] (CompParams& q) { q.knee = 20; }, [] (CompParams& q) { q.knee = 6; }, false },
+            { "Attack 10 → 0.5 ms", [] (CompParams& q) { q.atk = 0.0005; }, [] (CompParams& q) { q.atk = 0.01; }, false },
+            { "Release 100 → 20 ms", [] (CompParams& q) { q.rel = 0.02; }, [] (CompParams& q) { q.rel = 0.1; }, false },
+            { "Makeup 0 → +12 dB", [] (CompParams& q) { q.mk = 12; }, [] (CompParams& q) { q.mk = 0; }, false },
+            { "Lookahead 0 → 5 ms", [] (CompParams& q) { q.look = 0.005; }, [] (CompParams& q) { q.look = 0; }, false },
+            { "Detection RMS → Peak", [] (CompParams& q) { q.rms = false; }, [] (CompParams& q) { q.rms = true; }, false },
+            { "RMS time 50 → 5 ms", [] (CompParams& q) { q.rmsWin = 0.005; }, [] (CompParams& q) { q.rmsWin = 0.05; }, false },
+            { "Hold 0 → 100 ms", [] (CompParams& q) { q.hold = 0.1; }, [] (CompParams& q) { q.hold = 0; }, false },
+            { "Release Fixed → Auto", [] (CompParams& q) { q.autoRel = true; }, [] (CompParams& q) { q.autoRel = false; }, false },
+            { "Range 60 → 3 dB", [] (CompParams& q) { q.range = 3; }, [] (CompParams& q) { q.range = 60; }, false },
+            { "Auto gain Off → On", [] (CompParams& q) { q.autoGain = true; }, [] (CompParams& q) { q.autoGain = false; }, false },
+            { "Side-chain Off → HPF 500 Hz", [] (CompParams& q) { q.scType = Biquad::HPF; q.scF = 500; }, [] (CompParams& q) { q.scType = Biquad::Off; }, false },
+            { "SC freq 500 → 2000 Hz (HPF)", [] (CompParams& q) { q.scF = 2000; }, [] (CompParams& q) { q.scF = 500; }, false },
+            { "SC source Internal → External", [] (CompParams& q) { q.scExternal = true; }, [] (CompParams& q) { q.scExternal = false; }, false },
+            { "Stereo link 100 → 0 %", [] (CompParams& q) { q.link = 0; }, [] (CompParams& q) { q.link = 1; }, false },
+            { "Mode Stereo → Mid-Side", [] (CompParams& q) { q.midSide = true; }, [] (CompParams& q) { q.midSide = false; }, false },
+            { "Oversampling Off → 8×", [] (CompParams& q) { q.os = 3; }, [] (CompParams& q) { q.os = 0; }, false },
+            { "Oversampling 2× → 4×", [] (CompParams& q) { q.os = 2; }, [] (CompParams& q) { q.os = 1; }, false },
+            { "OS filter Linear → Minimum (4×)", [] (CompParams& q) { q.osMin = true; }, [] (CompParams& q) { q.osMin = false; }, false },
+            { "∞ : True peak On → Off", [] (CompParams& q) { q.truePeak = false; }, [] (CompParams& q) { q.truePeak = true; }, true },
+            { "∞ : Threshold −20 → −30 dB", [] (CompParams& q) { q.thr = -30; }, [] (CompParams& q) { q.thr = -20; }, true },
+            { "∞ : Lookahead 5 → 1 ms", [] (CompParams& q) { q.look = 0.001; }, [] (CompParams& q) { q.look = 0.005; }, true },
+            { "∞ : Release 100 → 20 ms", [] (CompParams& q) { q.rel = 0.02; }, [] (CompParams& q) { q.rel = 0.1; }, true },
+        };
+        (void) S;
+        for (auto& e : ev)
+        {
+            CompParams p; p.thr = -20; p.ratio = 4; p.knee = 6; p.atk = 0.01; p.rel = 0.1; p.rms = true; p.rmsWin = 0.05;
+            if (e.limiter) { p.ratio = 20; p.look = 0.005; p.knee = 0; }
+            const std::string nm = e.name;
+            if (nm.find ("Ratio 4 → ∞") != std::string::npos) p.look = 0.005;   // sans anticipation un limiteur écrête : ce ne serait pas un clic
+            if (nm.find ("SC freq") != std::string::npos) { p.scType = Biquad::HPF; p.scF = 500; }
+            if (nm.find ("2× → 4×") != std::string::npos) p.os = 1;
+            if (nm.find ("OS filter") != std::string::npos) p.os = 2;
+            auto go = e.go; auto back = e.back;
+            auto o = run (fs, x, x, p, false, &sc, &sc, 256, [go, back] (int pos, CompParams& q) { if (pos == 256 * 94) go (q); if (pos == 256 * 188) back (q); });
+            const double c = std::max (clickDb (o.L, fs, amp, 8192), clickDb (o.dL, fs, amp, 8192));
+            std::snprintf (m, sizeof m, "%-34s %.1f dB", e.name, c);
+            check (c < -90, m);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     std::printf ("\n11) Charge de calcul (indicative, 48 kHz stéréo)\n");
     {
         const double fs = 48000; std::vector<float> L, R; stress (fs, 4, L, R);
         struct K { const char* name; CompParams p; };
         CompParams base; base.thr = -20; base.ratio = 4;
-        CompParams o2 = base; o2.os = 1; CompParams o4 = base; o4.os = 2;
-        for (const K& k : { K { "compresseur", base }, K { "compresseur 2×", o2 }, K { "compresseur 4×", o4 }, K { "limiteur ∞ true peak", brickwall() } })
+        CompParams o2 = base; o2.os = 1; CompParams o4 = base; o4.os = 2; CompParams o8 = base; o8.os = 3;
+        CompParams m8 = o8; m8.osMin = true; CompParams ag = base; ag.autoGain = true;
+        for (const K& k : { K { "compresseur", base }, K { "compresseur 2×", o2 }, K { "compresseur 4×", o4 }, K { "compresseur 8×", o8 },
+                            K { "compresseur 8× phase min.", m8 }, K { "compresseur + auto-gain", ag }, K { "limiteur ∞ true peak", brickwall() } })
         {
-            const auto t0 = std::chrono::steady_clock::now();
-            auto o = run (fs, L, R, k.p);
-            const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count();
-            std::printf ("    %-24s %.2f %% d'un cœur\n", k.name, ms / 4000 * 100);
+            double best = 1e9;
+            for (int rep = 0; rep < 3; ++rep) { auto o = run (fs, L, R, k.p); best = std::min (best, lastRunMs); }
+            std::printf ("    %-28s %.2f %% d'un cœur\n", k.name, best / 4000 * 100);
         }
     }
 

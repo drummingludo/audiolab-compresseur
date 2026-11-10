@@ -329,7 +329,7 @@ public:
         const double s = 1.0 / compRatio (p.ratio) - 1.0;
         rH.thr.set (p.thr); rH.slope.set (s); rH.knee.set (p.knee); rH.mk.set (p.mk); rH.link.set (clamp01 (p.link));
         rH.autoW.set (p.autoRel ? 1.0 : 0.0);
-        rH.range.set (std::clamp (p.range, 0.0, 60.0));
+        rH.range.set (std::clamp (p.range, 0.0, 60.0)); rH.detW.set (p.rms ? 1.0 : 0.0);
         rB.thr.set (p.thr); rB.mk.set (p.mk); rB.link.set (clamp01 (p.link)); rB.autoW.set (p.autoRel ? 1.0 : 0.0);
     }
 
@@ -503,7 +503,7 @@ private:
     };
 
     // ── Rampes de lissage ────────────────────────────────────────────────
-    struct Ramps { Ramp thr, slope, knee, mk, link, autoW, scW, range; };
+    struct Ramps { Ramp thr, slope, knee, mk, link, autoW, scW, range, detW; };
 
     void resetRamps()
     {
@@ -512,7 +512,7 @@ private:
         {
             r->thr.reset (p.thr); r->slope.reset (s); r->knee.reset (p.knee); r->mk.reset (p.mk);
             r->link.reset (clamp01 (p.link)); r->autoW.reset (p.autoRel ? 1.0 : 0.0); r->scW.reset (0.0);
-            r->range.reset (std::clamp (p.range, 0.0, 60.0));
+            r->range.reset (std::clamp (p.range, 0.0, 60.0)); r->detW.reset (p.rms ? 1.0 : 0.0);
         }
         mkLinH = mkLinB = std::pow (10.0, p.mk / 20.0);
         thrLinB = std::pow (10.0, p.thr / 20.0);
@@ -546,9 +546,9 @@ private:
         for (int c = 0; c < 2; ++c) { std::fill (xb[c].begin(), xb[c].end(), 0.0f); std::fill (db[c].begin(), db[c].end(), 0.0f); }
         for (auto& b : bank) for (int c = 0; c < 2; ++c) std::fill (b.gh[c].begin(), b.gh[c].end(), 1.0);
         const int rl = std::max (1, jsRound (rampSec * fs * factor));
-        for (Ramp* r : { &rH.thr, &rH.slope, &rH.knee, &rH.mk, &rH.link, &rH.autoW, &rH.scW, &rH.range }) r->setLength (rl, fs * factor);
+        for (Ramp* r : { &rH.thr, &rH.slope, &rH.knee, &rH.mk, &rH.link, &rH.autoW, &rH.scW, &rH.range, &rH.detW }) r->setLength (rl, fs * factor);
         const int rb = std::max (1, jsRound (rampSec * fs));
-        for (Ramp* r : { &rB.thr, &rB.slope, &rB.knee, &rB.mk, &rB.link, &rB.autoW, &rB.scW, &rB.range }) r->setLength (rb, fs);
+        for (Ramp* r : { &rB.thr, &rB.slope, &rB.knee, &rB.mk, &rB.link, &rB.autoW, &rB.scW, &rB.range, &rB.detW }) r->setLength (rb, fs);
         for (int c = 0; c < 2; ++c) { scH[c].clear(); scB[c].clear(); }
         setScFilters();
         updateCoefs();
@@ -625,25 +625,27 @@ private:
     static inline double toDb (double lvl) { return lvl > 1e-6 ? 20 * std::log10 (lvl) : -120; }
 
     // Une banque traite un échantillon (rythme haut) : écrit les gains dans son historique, renvoie la GR max
-    inline double runBank (Bank& b, double dl, double dr, double thr, double s, double kn, double lk, double mk, double wA, int w, double rng)
+    inline double runBank (Bank& b, double dl, double dr, double thr, double s, double kn, double lk, double mk, double wA, int w, double rng, double wR)
     {
         // Range : réduction visée plafonnée (60 = sans limite, calcul inchangé)
         auto gc = [rng] (double d, double t, double sl, double k) { const double g = gainComputer (d, t, sl, k); return (rng < 60 && g > rng) ? rng : g; };
         double d0 = dl, d1 = dr;
         if (b.ms) { d0 = (dl + dr) * 0.5; d1 = (dl - dr) * 0.5; }
-        double lvl;
-        if (p.rms)
+        // Peak ↔ RMS : wR passe de 0 à 1 en 20 ms (fondu des réductions visées), 0 ou 1 exactement en régime établi
+        const bool useR = wR > 0, useP = wR < 1;
+        double lvlR = 0, lvlP = 0;
+        if (useR)
         {
             const double sq = (d0 * d0 + d1 * d1) / 2;
             b.accLink = rmsCoef * b.accLink + (1 - rmsCoef) * sq;
             b.acc[0] = rmsCoef * b.acc[0] + (1 - rmsCoef) * d0 * d0;
             b.acc[1] = rmsCoef * b.acc[1] + (1 - rmsCoef) * d1 * d1;
-            lvl = std::sqrt (b.accLink);
+            lvlR = std::sqrt (b.accLink);
         }
-        else lvl = std::max (std::abs (d0), std::abs (d1));
+        if (useP) lvlP = std::max (std::abs (d0), std::abs (d1));
         const double aRel = p.autoRel ? aRfast : aR;
         // détection crête suréchantillonnée : réduction moyenne exacte entre deux échantillons (anti-repliement)
-        const bool aa = factor > 1 && ! p.rms;
+        const bool aa = factor > 1 && useP;
         double grA[2] = { 0, 0 };
         if (aa)
         {
@@ -658,8 +660,8 @@ private:
                 b.dp[c] = d[c]; b.Ap[c] = An;
             }
         }
-        const double dbLink = aa ? 0.0 : toDb (lvl);
-        const double grLink = aa ? std::max (grA[0], grA[1]) : gc (dbLink, thr, s, kn);
+        const double grP = ! useP ? 0.0 : aa ? std::max (grA[0], grA[1]) : gc (toDb (lvlP), thr, s, kn);
+        const double grLink = ! useR ? grP : useP ? grP + wR * (gc (toDb (lvlR), thr, s, kn) - grP) : gc (toDb (lvlR), thr, s, kn);
         if (lk >= 1)
         {
             const double G = aa ? b.st[0].compAA (grLink, aA, aRel, aS, holdH, wA) : b.st[0].comp (grLink, aA, aRel, aS, holdH, wA);
@@ -674,8 +676,9 @@ private:
         double gmax = 0;
         for (int c = 0; c < 2; ++c)
         {
-            const double own = p.rms ? std::sqrt (b.acc[c]) : std::abs (c == 0 ? d0 : d1);
-            const double grv = lk * grLink + (1 - lk) * (aa ? grA[c] : gc (toDb (own), thr, s, kn));
+            const double oP = ! useP ? 0.0 : aa ? grA[c] : gc (toDb (std::abs (c == 0 ? d0 : d1)), thr, s, kn);
+            const double oR = useR ? gc (toDb (std::sqrt (b.acc[c])), thr, s, kn) : 0.0;
+            const double grv = lk * grLink + (1 - lk) * (! useR ? oP : useP ? oP + wR * (oR - oP) : oR);
             const double G = aa ? b.st[c].compAA (grv, aA, aRel, aS, holdH, wA) : b.st[c].comp (grv, aA, aRel, aS, holdH, wA);
             double lin = std::pow (10.0, -G / 20) * mk;
             if (gSm > 0) { b.sm[c][0] += gSm * (lin - b.sm[c][0]); b.sm[c][1] += gSm * (b.sm[c][0] - b.sm[c][1]); lin = b.sm[c][1]; }
@@ -760,13 +763,13 @@ private:
             xb[0][(size_t) w] = hi[0][j]; xb[1][(size_t) w] = hi[1][j];
             db[0][(size_t) w] = (float) dl; db[1][(size_t) w] = (float) dr;
 
-            const double thr = rH.thr.next(), s = rH.slope.next(), kn = rH.knee.next(), lk = rH.link.next(), wA = rH.autoW.next(), rng = rH.range.next();
+            const double thr = rH.thr.next(), s = rH.slope.next(), kn = rH.knee.next(), lk = rH.link.next(), wA = rH.autoW.next(), rng = rH.range.next(), wR = rH.detW.next();
             if (rH.mk.active()) mkLinH = std::pow (10.0, rH.mk.next() / 20.0);   // fin de rampe : exactement la cible
             const double mk = mkLinH;
 
             adaaDirty = ! (same (thr, adaa.thr) && same (-s, adaa.sg) && same (kn, adaa.kn) && same (rng, adaa.rng));
-            const double G = runBank (bank[ba], dl, dr, thr, s, kn, lk, mk, wA, w, rng);
-            if (dualBank) runBank (bank[bn], dl, dr, thr, s, kn, lk, mk, wA, w, rng);
+            const double G = runBank (bank[ba], dl, dr, thr, s, kn, lk, mk, wA, w, rng, wR);
+            if (dualBank) runBank (bank[bn], dl, dr, thr, s, kn, lk, mk, wA, w, rng, wR);
             if (G > grComp) grComp = G;
 
             double yl, yr;
