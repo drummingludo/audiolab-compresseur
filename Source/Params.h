@@ -26,7 +26,7 @@ inline constexpr const char* scSource  = "scSource";     // Internal / External
 inline constexpr const char* link      = "stereoLink";   // 0 … 100 %
 inline constexpr const char* stMode    = "stereoMode";   // Stereo / Mid-Side
 inline constexpr const char* hold      = "hold";         // 0 … 500 ms
-inline constexpr const char* autoRel   = "autoRelease";  // Off / On
+inline constexpr const char* autoRel   = "autoRelease";  // Off / On / Smart (Smart ajouté en 3.0.0, en fin de liste)
 inline constexpr const char* rmsWin    = "rmsWindow";    // 1 … 300 ms
 inline constexpr const char* oversamp  = "oversampling"; // Off / 2× / 4× / 8× (8× ajouté en 3.0.0, en fin de liste)
 // 3.0.0
@@ -110,7 +110,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     fl (link, "Stereo Link", linRange (0, 100, 1), 100, "%", [] (float v, int) { return String (roundToInt (v)) + " %"; }, 2);
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { stMode, 2 }, "Stereo Mode", StringArray { "Stereo", "Mid-Side" }, 0));
     fl (hold, "Hold", powRange (0, 500, 1, 2), 0, "ms", [] (float v, int) { return String (roundToInt (v)) + " ms"; }, 2);
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { autoRel, 2 }, "Auto Release", StringArray { "Off", "On" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { autoRel, 2 }, "Auto Release", StringArray { "Off", "On", "Smart" }, 0));
     fl (rmsWin, "RMS Window", logRange (1, 300, 0.1f), 3, "ms", [] (float v, int) { return fmtMs (v); }, 2);
     // suréchantillonnage : change la latence, donc non automatisable (réglé une fois, hors lecture de préférence)
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { oversamp, 2 }, "Oversampling", StringArray { "Off", "2" + times, "4" + times, "8" + times }, 0,

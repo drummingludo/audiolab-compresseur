@@ -16,7 +16,7 @@ static const char* helpLook = "The detector sees the signal in advance: the atta
 // 2.0.0
 static const char* helpRms  = "RMS window: how long the detector averages the level (RMS detection only). Short = closer to the peaks, long = follows the loudness. Default 3 ms.";
 static const char* helpHold = "Hold: keeps the gain reduction in place for this time before the release starts. Avoids distortion on bass notes and a fluttering gain.";
-static const char* helpRelA = "Auto release adapts to the music: after a short peak the gain comes back 3 times faster than the Release setting, after a long compression 3 times slower. Less pumping, more punch.";
+static const char* helpRelA = "Auto release adapts to the music: after a short peak the gain comes back 3 times faster than the Release setting, after a long compression 3 times slower. Less pumping, more punch. Smart: Auto, plus a hold that follows the pitch of sustained notes, so a fast release no longer distorts the bass; single hits release as in Auto.";
 static const char* helpTp   = "True peak (\xe2\x88\x9e:1 only): the limiter also catches the peaks between the samples, so the output stays under the ceiling after conversion. Needs 32 samples of lookahead (1 ms at 44.1 and 48 kHz) and adds 64 samples of latency.";
 static const char* helpScS  = "Side-chain source. Internal: the compressor listens to its own input. External: it listens to the side-chain input set in your DAW (ducking). With no side-chain connected, it stays internal.";
 static const char* helpLink = "Stereo link: 100 % = both channels get the same gain reduction (stable stereo image). 0 % = each channel is compressed on its own. 50 % = the quieter channel gets half the reduction.";

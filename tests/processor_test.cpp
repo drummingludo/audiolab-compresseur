@@ -310,6 +310,12 @@ int main()
         check (juce::approximatelyEqual (b.getParam (P::range), 60.0f) && b.getParam (P::autoGain) < 0.5f && b.getParam (P::osFilter) < 0.5f
                && juce::roundToInt (b.getParam (P::oversamp)) == 2 && juce::approximatelyEqual (b.getParam (P::thr), -18.0f),
                "session 2.0.0 rouverte : Range Off, Auto gain Off, filtre Linear ; son suréchantillonnage 4× reste 4×");
+        {   // une session 2.0.0 en release Auto (indice 1) reste en Auto ; Smart (indice 2) se rappelle
+            AudioLabCompProcessor o; setP (o, P::autoRel, 1); juce::MemoryBlock m1; o.getStateInformation (m1);
+            AudioLabCompProcessor r; setP (r, P::autoRel, 2); juce::MemoryBlock m2; r.getStateInformation (m2);
+            r.setStateInformation (m1.getData(), (int) m1.getSize()); o.setStateInformation (m2.getData(), (int) m2.getSize());
+            check (juce::roundToInt (r.getParam (P::autoRel)) == 1 && juce::roundToInt (o.getParam (P::autoRel)) == 2, "Release : une session en Auto reste en Auto, Smart est rappelé");
+        }
         AudioLabCompProcessor c; setP (c, P::range, 12); setP (c, P::autoGain, 1); setP (c, P::osFilter, 1); setP (c, P::oversamp, 3);
         juce::MemoryBlock mb2; c.getStateInformation (mb2);
         AudioLabCompProcessor d; d.setStateInformation (mb2.getData(), (int) mb2.getSize());

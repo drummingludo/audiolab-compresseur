@@ -218,6 +218,7 @@ Captures : `docs/captures_3.0.0/` (60, 100 et 200 %, replié et déplié).
 | OS filter | `osFilter` | Linear / Minimum | Linear | filtres du suréchantillonnage ; Minimum = latence nulle annoncée |
 | Oversampling | `oversampling` | Off / 2× / 4× / 8× | Off | 8× ajouté en fin de liste : les sessions 2.0.0 gardent leur réglage |
 | Mix | `mix` | 0 à 100 % | 100 % | réglage existant, désormais affiché dans le panneau |
+| Release | `autoRelease` | Fixed / Auto / Smart | Fixed | Smart ajouté en fin de liste : Auto, plus un maintien automatique calé sur la période du signal |
 
 ### Moteur
 
@@ -227,7 +228,7 @@ Captures : `docs/captures_3.0.0/` (60, 100 et 200 %, replié et déplié).
 - Limiteur ∞ : second étage qui mesure la crête vraie de la sortie du premier (interpolateur de 96 points) et la retouche avec 64 échantillons d'avance. Crête vraie active dès 32 échantillons de lookahead.
 - Latences : suréchantillonnage linéaire 85 / 93 / 96 échantillons (2× / 4× / 8×) ; phase minimale 0 annoncé (retard réel 4,5 à 6,5 échantillons) ; limiteur crête vraie + 64 ; AAX : latence fixe de 10 ms + 64 échantillons.
 
-### Mesures (banc `tests/quality_test.cpp`, 144 vérifications)
+### Mesures (banc `tests/quality_test.cpp`, 149 vérifications)
 
 | Mesure | 2.0.0 | 3.0.0 |
 |---|---|---|
@@ -244,6 +245,7 @@ Captures : `docs/captures_3.0.0/` (60, 100 et 200 %, replié et déplié).
 ### Non fait, non vérifié
 
 - Aucune écoute. Aucune mesure de Pro-C, UAD ou Waves.
-- Sinus 50 Hz, release 30 ms en Peak : 2,5 % de distorsion, comme en 2.0.0 (0,06 % en RMS 50 ms, nulle avec Hold 20 ms).
-- Release automatique affiné et caractères de compression : non commencés.
+- Sinus 50 Hz, release 30 ms en Peak : 2,5 % de distorsion en Fixed et 4,9 % en Auto, comme en 2.0.0 ; 0,004 % en Smart (de 40 à 150 Hz). Les réglages par défaut (Fixed) ne changent pas de son.
+- Release Smart : mesuré sur des sinus et sur une frappe isolée (même release qu'en Auto, écart 48 dB sous le signal), pas sur de la musique réelle.
+- Caractères de compression : non commencés.
 - Mac (VST3, AU, AAX), Windows, Logic, Pro Tools : non testés pour la 3.0.0 ; pluginval niveau 10 passé en VST3 sous Linux uniquement.

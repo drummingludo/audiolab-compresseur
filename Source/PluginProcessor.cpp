@@ -60,6 +60,7 @@ CompParams AudioLabCompProcessor::currentParams() const
     p.midSide = getParam (params::stMode) > 0.5f;
     p.hold = getParam (params::hold) / 1000.0;
     p.autoRel = getParam (params::autoRel) > 0.5f;
+    p.smartRel = getParam (params::autoRel) > 1.5f;   // 3.0.0 : Auto + maintien calé sur la période du signal
     p.rmsWin = getParam (params::rmsWin) / 1000.0;
     p.os = juce::roundToInt (getParam (params::oversamp));
     p.osMin = getParam (params::osFilter) > 0.5f;

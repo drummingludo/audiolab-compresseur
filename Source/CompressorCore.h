@@ -90,6 +90,7 @@ struct CompParams
     bool   midSide    = false;   // détection et gain sur Mid / Side
     double hold       = 0;       // s
     bool   autoRel    = false;   // release automatique (deux constantes de temps)
+    bool   smartRel   = false;   // 3.0.0, avec autoRel : maintien automatique calé sur la période du signal (grave sans distorsion)
     double rmsWin     = 0.003;   // s
     int    os         = 0;       // suréchantillonnage : 0 = Off, 1 = ×2, 2 = ×4, 3 = ×8
     // 3.0.0
@@ -128,30 +129,47 @@ struct GainStage
 {
     double g = 0, gs = 0, up = 0;
     int hc = 0;
+    // Release « Smart » (3.0.0) : maintien automatique. On mesure l'intervalle entre deux débuts d'attaque successifs
+    // (so : échantillons depuis le dernier début, ia : attaque en cours). S'il est court (moins de adapt, soit 25 ms),
+    // le son est tenu et périodique : le maintien vaut 1,25 fois cette période, la réduction ne redescend plus entre
+    // deux crêtes et le gain ne module plus la forme d'onde (distorsion du grave). Sur une frappe isolée l'intervalle
+    // est long : aucun maintien, le release part aussitôt. adapt = 0 : calcul strictement inchangé.
+    int so = 1 << 28, per = 0;
+    bool ia = false;
+    inline int holdFor (int hold, int adapt)
+    {
+        if (adapt <= 0) return hold;
+        if (! ia) { per = so < adapt ? so : 0; so = 0; ia = true; }
+        return std::max (hold, std::min (adapt, per + per / 4));
+    }
+    inline void tick (int adapt, bool attacking) { if (adapt > 0) { if (! attacking) ia = false; if (so < (1 << 28)) ++so; } }
 
     // Release automatique = deux détecteurs en parallèle (double RC) : le rapide (release ÷ 3) et un lent
     // (constante release × 3, en charge comme en décharge) qui ne se remplit que si la compression dure ;
     // on garde le plus fort des deux.
     // compresseur : attaque exponentielle (formule d'Audio Lab)
-    inline double comp (double gr, double aA, double aR, double aS, int hold, double wAuto)
+    inline double comp (double gr, double aA, double aR, double aS, int hold, double wAuto, int adapt = 0)
     {
-        if (gr > g) { g = aA * g + (1 - aA) * gr; hc = hold; }
+        const bool at = gr > g;
+        if (at) { g = aA * g + (1 - aA) * gr; hc = holdFor (hold, adapt); }
         else if (hc > 0) --hc;
         else g = aR * g + (1 - aR) * gr;
+        tick (adapt, at);
         gs = aS * gs + (1 - aS) * gr;
         return wAuto > 0 ? g + wAuto * std::max (0.0, gs - g) : g;
     }
     // Version suréchantillonnée : même calcul, mais le passage attaque ↔ release est daté ENTRE deux échantillons
     // (la cible est supposée linéaire sur l'intervalle) et le pas est réduit à la fraction restante. Sans cela
     // l'instant de bascule est arrondi à l'échantillon, ce qui module le gain (repliement de la détection crête).
-    inline double compAA (double gr, double aA, double aR, double aS, int hold, double wAuto)
+    inline double compAA (double gr, double aA, double aR, double aS, int hold, double wAuto, int adapt = 0)
     {
+        const bool at = gr > g;
         // intégration par trapèzes : la cible vaut en moyenne (up + gr) / 2 sur l'intervalle
         if (gr > g)
         {
             if (up < g) g += (1 - aA) * 0.5 * (gr - g) * (gr - g) / (gr - up);   // croisement en montant : fraction (gr − g) / (gr − up)
             else        g += (1 - aA) * (0.5 * (up + gr) - g);
-            hc = hold;
+            hc = holdFor (hold, adapt);
         }
         else if (hc > 0) --hc;
         else if (up > g)
@@ -160,6 +178,7 @@ struct GainStage
             g += (1 - aA) * t * 0.5 * (up - g) + (1 - aR) * (1 - t) * 0.5 * (gr - g);
         }
         else g += (1 - aR) * (0.5 * (up + gr) - g);
+        tick (adapt, at);
         up = gr;
         gs = aS * gs + (1 - aS) * gr;
         return wAuto > 0 ? g + wAuto * std::max (0.0, gs - g) : g;
@@ -584,6 +603,7 @@ private:
         aS = std::exp (-1.0 / (std::max (0.001, p.rel * 3) * fh));       // × 3 après une compression prolongée
         rmsCoef = std::exp (-1.0 / (std::max (0.0005, p.rmsWin) * fh));
         holdH = std::max (0, jsRound (p.hold * fh));
+        adaptH = (p.autoRel && p.smartRel) ? jsRound (0.025 * fh) : 0;
         // suréchantillonné : le gain passe par deux pôles à gSmHz (inaudible, retire l'extrême aigu du gain qui se replierait)
         gSm = (factor > 1 && gSmHz > 0) ? 1 - std::exp (-2 * kPi * gSmHz / fh) : 0.0;
         // rythme de base (limiteur)
@@ -721,7 +741,7 @@ private:
         const double grLink = ! useR ? grP : useP ? grP + wR * (gc (toDb (lvlR), thr, s, kn) - grP) : gc (toDb (lvlR), thr, s, kn);
         if (lk >= 1)
         {
-            const double G = aa ? b.st[0].compAA (grLink, aA, aRel, aS, holdH, wA) : b.st[0].comp (grLink, aA, aRel, aS, holdH, wA);
+            const double G = aa ? b.st[0].compAA (grLink, aA, aRel, aS, holdH, wA, adaptH) : b.st[0].comp (grLink, aA, aRel, aS, holdH, wA, adaptH);
             b.st[1] = b.st[0];
             double lin = std::pow (10.0, -G / 20) * mk;
             if (gSm > 0) { b.sm[0][0] += gSm * (lin - b.sm[0][0]); b.sm[0][1] += gSm * (b.sm[0][0] - b.sm[0][1]); lin = b.sm[0][1]; b.sm[1][0] = b.sm[0][0]; b.sm[1][1] = lin; }
@@ -736,7 +756,7 @@ private:
             const double oP = ! useP ? 0.0 : aa ? grA[c] : gc (toDb (std::abs (c == 0 ? d0 : d1)), thr, s, kn);
             const double oR = useR ? gc (toDb (std::sqrt (b.acc[c])), thr, s, kn) : 0.0;
             const double grv = lk * grLink + (1 - lk) * (! useR ? oP : useP ? oP + wR * (oR - oP) : oR);
-            const double G = aa ? b.st[c].compAA (grv, aA, aRel, aS, holdH, wA) : b.st[c].comp (grv, aA, aRel, aS, holdH, wA);
+            const double G = aa ? b.st[c].compAA (grv, aA, aRel, aS, holdH, wA, adaptH) : b.st[c].comp (grv, aA, aRel, aS, holdH, wA, adaptH);
             double lin = std::pow (10.0, -G / 20) * mk;
             if (gSm > 0) { b.sm[c][0] += gSm * (lin - b.sm[c][0]); b.sm[c][1] += gSm * (b.sm[c][0] - b.sm[c][1]); lin = b.sm[c][1]; }
             b.gh[c][(size_t) w] = lin;
@@ -1006,6 +1026,7 @@ private:
     // coefficients
     double aA = 0, aR = 0, aRfast = 0, aS = 0, rmsCoef = 0, gSm = 0;
     AdaaGR adaa;
+    int adaptH = 0;
     bool adaaDirty = false;
 public:
     double gSmHz = 0;   // adoucissement du gain suréchantillonné : essayé, sans effet mesurable sur le repliement, laissé à 0

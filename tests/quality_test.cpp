@@ -627,6 +627,7 @@ int main()
             { "RMS time 50 → 5 ms", [] (CompParams& q) { q.rmsWin = 0.005; }, [] (CompParams& q) { q.rmsWin = 0.05; }, false },
             { "Hold 0 → 100 ms", [] (CompParams& q) { q.hold = 0.1; }, [] (CompParams& q) { q.hold = 0; }, false },
             { "Release Fixed → Auto", [] (CompParams& q) { q.autoRel = true; }, [] (CompParams& q) { q.autoRel = false; }, false },
+            { "Release Fixed → Smart", [] (CompParams& q) { q.autoRel = true; q.smartRel = true; }, [] (CompParams& q) { q.autoRel = false; q.smartRel = false; }, false },
             { "Range 60 → 3 dB", [] (CompParams& q) { q.range = 3; }, [] (CompParams& q) { q.range = 60; }, false },
             { "Auto gain Off → On", [] (CompParams& q) { q.autoGain = true; }, [] (CompParams& q) { q.autoGain = false; }, false },
             { "Side-chain Off → HPF 500 Hz", [] (CompParams& q) { q.scType = Biquad::HPF; q.scF = 500; }, [] (CompParams& q) { q.scType = Biquad::Off; }, false },
@@ -727,21 +728,36 @@ int main()
                 check (o.lat == 0 && num / den < 1e-10 && ov.minPhaseDelay() < 8, m);
             }
         }
-        {   // grave : distorsion d'un sinus 50 Hz compressé de 12 dB, release rapide (mesure d'information et garde-fou)
-            auto x = sine (fs, 50, -6, 2.0);
-            auto thd = [&] (CompParams p) {
+        {   // grave en release rapide : distorsion d'un sinus compressé de 12 dB, détection Peak, release 30 ms
+            auto thd = [&] (double f0, CompParams p) {
+                auto x = sine (fs, f0, -6, 2.0);
                 auto o = run (fs, x, x, p);
-                // fondamental par corrélation, le reste = distorsion
-                const size_t a0 = 48000, n = 48000; double c = 0, s = 0, e = 0;
-                for (size_t i = 0; i < n; ++i) { const double w = 2 * PI * 50 * (double) i / fs; c += o.L[a0 + i] * std::cos (w); s += o.L[a0 + i] * std::sin (w); e += (double) o.L[a0 + i] * o.L[a0 + i]; }
+                const size_t a0 = 48000, n = 48000; double c = 0, s = 0, e = 0;   // fondamental par corrélation, le reste = distorsion
+                for (size_t i = 0; i < n; ++i) { const double w = 2 * PI * f0 * (double) i / fs; c += o.L[a0 + i] * std::cos (w); s += o.L[a0 + i] * std::sin (w); e += (double) o.L[a0 + i] * o.L[a0 + i]; }
                 const double f2 = 2 * (c * c + s * s) / n;
                 return 100 * std::sqrt (std::max (0.0, e - f2) / f2); };
             CompParams p; p.thr = -24; p.ratio = 3; p.atk = 0.005; p.rel = 0.03;
-            const double tFix = thd (p);
-            CompParams q = p; q.hold = 0.02; const double tHold = thd (q);
-            CompParams r = p; r.rms = true; r.rmsWin = 0.05; const double tRms = thd (r);
-            std::snprintf (m, sizeof m, "sinus 50 Hz, release 30 ms : distorsion %.2f %% (Peak), %.2f %% avec Hold 20 ms, %.3f %% en RMS 50 ms", tFix, tHold, tRms);
-            check (tHold < tFix && tRms < 0.5, m);
+            CompParams au = p; au.autoRel = true;
+            CompParams sm = au; sm.smartRel = true;
+            CompParams s8 = sm; s8.os = 3;
+            for (double f0 : { 40.0, 50.0, 80.0, 150.0 })
+            {
+                const double tF = thd (f0, p), tA = thd (f0, au), tS = thd (f0, sm), tS8 = thd (f0, s8);
+                std::snprintf (m, sizeof m, "sinus %.0f Hz, release 30 ms : distorsion %.2f %% (Fixed), %.2f %% (Auto), %.3f %% (Smart), %.3f %% (Smart, 8×)", f0, tF, tA, tS, tS8);
+                check (tS < 0.05 && tS8 < 0.05 && tS < tF / 20, m);
+            }
+        }
+        {   // Smart ne retarde pas le release d'une frappe isolée : même retour au gain unité qu'en Auto
+            std::vector<float> x ((size_t) (fs * 1.0), 0.0f);
+            for (int i = 0; i < 2400; ++i) x[(size_t) (4800 + i)] = (float) (0.9 * std::sin (2 * PI * 3000.0 * i / fs) * std::exp (-i / 600.0));   // frappe de 50 ms
+            for (size_t i = 0; i < x.size(); ++i) x[i] += (float) (0.01 * std::sin (2 * PI * 700.0 * (double) i / fs));                        // son témoin très faible
+            CompParams au; au.thr = -30; au.ratio = 6; au.atk = 0.001; au.rel = 0.1; au.autoRel = true;
+            CompParams sm = au; sm.smartRel = true;
+            auto a = run (fs, x, x, au), b = run (fs, x, x, sm);
+            double d = 0, ref = 0;
+            for (size_t i = 7200; i < x.size(); ++i) { d = std::max (d, (double) std::abs (a.L[i] - b.L[i])); ref = std::max (ref, (double) std::abs (a.L[i])); }
+            std::snprintf (m, sizeof m, "frappe isolée : écart Smart / Auto pendant le release %.1f dB sous le signal", -20 * std::log10 (d / ref + 1e-12));
+            check (d / ref < 0.05, m);
         }
     }
 

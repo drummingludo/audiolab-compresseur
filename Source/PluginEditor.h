@@ -53,7 +53,7 @@ private:
     std::unique_ptr<audiolab::SliderRow> rowRange, rowMix;
     audiolab::SegButtons agSeg { theme, { "Off", "On" } };
     audiolab::SegButtons osfSeg { theme, { "Linear", "Minimum" } };
-    audiolab::SegButtons relSeg { theme, { "Fixed", "Auto" } };
+    audiolab::SegButtons relSeg { theme, { "Fixed", "Auto", "Smart" } };
     audiolab::SegButtons tpSeg { theme, { "Off", "On" } };
     audiolab::SegButtons scSrcSeg { theme, { "Internal", "External" } };
     audiolab::SegButtons modeSeg { theme, { "Stereo", "Mid-Side" } };
