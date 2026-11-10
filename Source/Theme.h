@@ -72,16 +72,24 @@ inline float textWidth (const juce::Font& f, const juce::String& s)
 }
 
 // Largeur d'un texte dont chaque chiffre occupe une cellule fixe (valeurs qui bougent : pas de tremblement)
+// Largeur de la cellule d'un caractère. Les chiffres ont une cellule fixe (la valeur ne « danse » pas quand elle
+// change), sauf le « 1 », bien plus étroit dans Poppins : centré dans une cellule entière il laissait un blanc
+// (« 1 0 », « 1 00 % »). Il reçoit sa largeur propre plus le même blanc latéral que le « 0 » (3.0.0).
+inline float tabularCell (const Theme& t, const juce::Font& f, juce::juce_wchar c, float size, int weight)
+{
+    const float adv = textWidth (f, juce::String::charToString (c));
+    if (! juce::CharacterFunctions::isDigit (c)) return adv;
+    const float cell = size * Theme::digitCell (weight);
+    if (c != '1') return cell;
+    return adv + std::max (0.0f, cell - textWidth (f, "0"));
+}
 inline float tabularWidth (const Theme& t, const juce::String& s, float size, int weight, float tracking = 0)
 {
     const auto f = t.ui (size, weight, tracking);
     float w = 0;
-    for (auto c : s)
-        w += juce::CharacterFunctions::isDigit (c) ? size * Theme::digitCell (weight) : textWidth (f, juce::String::charToString (c));
+    for (auto c : s) w += tabularCell (t, f, c, size, weight);
     return w;
 }
-
-// Dessine un texte à chiffres en cellules fixes, centré verticalement dans « area »
 inline void drawTabular (juce::Graphics& g, const Theme& t, const juce::String& s, float size, int weight,
                          juce::Rectangle<float> area, juce::Justification just, float tracking = 0)
 {
@@ -96,7 +104,7 @@ inline void drawTabular (juce::Graphics& g, const Theme& t, const juce::String& 
     {
         const auto ch = juce::String::charToString (c);
         const float adv = textWidth (f, ch);
-        const float cell = juce::CharacterFunctions::isDigit (c) ? size * Theme::digitCell (weight) : adv;
+        const float cell = tabularCell (t, f, c, size, weight);
         juce::GlyphArrangement ga; ga.addLineOfText (f, ch, x + (cell - adv) / 2, base); ga.draw (g);
         x += cell;
     }
