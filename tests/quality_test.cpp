@@ -250,7 +250,7 @@ int main()
             const double sp = std::max (peakDb (o.L), peakDb (o.R)), t = std::max (truePeakDb (o.L), truePeakDb (o.R));
             const bool tpOn = look >= 0.001;
             const double tol = 0.1;   // plein spectre (contenu jusqu'à Nyquist) : ≤ 0.1 dB ; ≤ 20 kHz : sous le plafond (voir plus haut)
-            std::snprintf (m, sizeof m, "lookahead %.1f ms : crête échantillon %.4f dBFS, crête vraie %.3f dBTP%s", look * 1000, sp, t, tpOn ? "" : " (true peak inactif sous 1 ms)");
+            std::snprintf (m, sizeof m, "lookahead %.1f ms : crête échantillon %.4f dBFS, crête vraie %.3f dBTP%s", look * 1000, sp, t, tpOn ? "" : " (true peak inactif sous 32 échantillons)");
             check (sp <= -4 + 1e-4 && (! tpOn || t <= -4 + tol), m);
         }
         {
@@ -286,7 +286,7 @@ int main()
                     auto o = run (fs, imp, imp, p, aax);
                     int pw = 0, pd = 0;
                     for (int i = 0; i < 8192; ++i) { if (std::abs (o.L[(size_t) i]) > std::abs (o.L[(size_t) pw])) pw = i; if (std::abs (o.dL[(size_t) i]) > std::abs (o.dL[(size_t) pd])) pd = i; }
-                    const int expect = (aax ? 480 : (int) std::lround (look * fs)) + (os == 0 ? 0 : os == 1 ? 85 : os == 2 ? 93 : 96);
+                    const int expect = (aax ? 480 + 64 : (int) std::lround (look * fs)) + (os == 0 ? 0 : os == 1 ? 85 : os == 2 ? 93 : 96);
                     auto n = run (fs, bl, bl, p, aax);
                     double num = 0, den = 0;
                     for (size_t i = 4096; i < bl.size(); ++i) { const double d = (double) n.L[i] - n.dL[i]; num += d * d; den += (double) n.dL[i] * n.dL[i]; }
@@ -600,7 +600,8 @@ int main()
             double d = 0;
             for (size_t i = 0; i + (size_t) sh < L.size(); ++i) d = std::max ({ d, (double) std::abs (x.L[i + (size_t) sh] - v.L[i]), (double) std::abs (x.R[i + (size_t) sh] - v.R[i]) });
             std::snprintf (m, sizeof m, "%s : décalage %d éch., écart max %.3g", k.name, sh, d);
-            check (d == 0 && sh == 480 - (int) std::lround (k.p.look * fs), m);
+            // 3.0.0 : la latence constante vaut 10 ms + 64 éch. (second étage crête vraie), que le limiteur ∞ compte déjà en VST3
+            check (d == 0 && sh == 480 + 64 - (int) std::lround (k.p.look * fs) - (k.p.ratio >= 20 ? 64 : 0), m);
         }
     }
 
@@ -656,6 +657,91 @@ int main()
             const double c = std::max (clickDb (o.L, fs, amp, 8192), clickDb (o.dL, fs, amp, 8192));
             std::snprintf (m, sizeof m, "%-34s %.1f dB", e.name, c);
             check (c < -90, m);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    std::printf ("\n13) Limiteur ∞ 3.0.0 : crête vraie sous le plafond même avec du contenu jusqu'à Nyquist (bruit blanc plein spectre)\n");
+    {
+        for (double fs : rates)
+            for (double look : { 0.0008, 0.001, 0.005 })
+            {
+                if ((int) std::lround (look * fs) < 32) continue;      // crête vraie active dès 32 échantillons d'anticipation
+                std::mt19937 rng (21); std::uniform_real_distribution<double> U (-1, 1);
+                std::vector<float> a ((size_t) (fs * 1.5)), b (a.size());
+                for (size_t i = 0; i < a.size(); ++i) { a[i] = (float) U (rng); b[i] = (float) U (rng); }
+                std::vector<float> sl, sr; stress (fs, 1.5, sl, sr, 5);
+                CompParams p = brickwall (look);
+                auto o = run (fs, a, b, p); auto o2 = run (fs, sl, sr, p);
+                const size_t from = (size_t) (0.1 * fs);
+                const double tpn = std::max (truePeakDb (o.L, from), truePeakDb (o.R, from)), tps = std::max (truePeakDb (o2.L, from), truePeakDb (o2.R, from));
+                const double spk = std::max (peakDb (o.L, from), peakDb (o2.L, from));
+                std::snprintf (m, sizeof m, "%.1f kHz, lookahead %.1f ms : bruit blanc %.3f dBTP, signal d'épreuve %.3f dBTP, crête échantillon %.3f dBFS (plafond −4)", fs / 1000, look * 1000, tpn, tps, spk);
+                check (tpn <= -4.0 && tps <= -4.0 && spk <= -4.0, m);
+            }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    std::printf ("\n14) Range, auto-gain, phase minimale, grave en release rapide (3.0.0)\n");
+    {
+        const double fs = 48000;
+        {   // Range : la réduction ne dépasse jamais la valeur réglée
+            auto x = sine (fs, 1000, 0, 1.0);
+            CompParams p; p.thr = -40; p.ratio = 10; p.atk = 0.001; p.rel = 0.1; p.rms = true; p.rmsWin = 0.02;
+            auto full = run (fs, x, x, p); p.range = 6; auto lim6 = run (fs, x, x, p);
+            const double gFull = dB (rms (full.L, 40000, 48000) / rms (x, 40000, 48000)), g6 = dB (rms (lim6.L, 40000, 48000) / rms (x, 40000, 48000));
+            std::snprintf (m, sizeof m, "Range 6 dB : réduction %.2f dB (sans Range : %.2f dB)", -g6, -gFull);
+            check (std::abs (g6 + 6) < 0.02 && gFull < -30, m);
+            CompParams d; d.thr = -20; d.ratio = 4; auto r60 = run (fs, x, x, d); d.range = 60; auto r60b = run (fs, x, x, d);
+            check (r60.L == r60b.L, "Range 60 dB (défaut) : sortie identique au bit près");
+        }
+        {   // Auto gain : même volume (pondération K) en sortie qu'en entrée
+            // musique dense stationnaire : le dernier quart du signal d'épreuve (0,5 s), répété 16 fois
+            std::vector<float> sL, sR, L, R; stress (fs, 2, sL, sR, 4);
+            for (int k = 0; k < 16; ++k) { L.insert (L.end(), sL.begin() + 72000, sL.end()); R.insert (R.end(), sR.begin() + 72000, sR.end()); }
+            for (double thr : { -30.0, -18.0 })
+            {
+                CompParams p; p.thr = thr; p.ratio = 4; p.atk = 0.005; p.rel = 0.1; p.autoGain = true;
+                auto o = run (fs, L, R, p);
+                auto kw = [&] (const std::vector<float>& v) {
+                    Biquad h; h.set (Biquad::HPF, 60, 0.5, fs); double s = 0; size_t n = 0;
+                    for (size_t i = 0; i < v.size(); ++i) { const double y = h.run (v[i]); if (i >= (size_t) (6.0 * fs) && i < (size_t) (8.0 * fs)) { s += y * y; ++n; } }
+                    return 10 * std::log10 (s / n + 1e-30); };
+                p.autoGain = false; auto raw = run (fs, L, R, p);
+                const double dIn = kw (o.dL), dOut = kw (o.L), dRaw = kw (raw.L);
+                std::snprintf (m, sizeof m, "Auto gain, seuil %.0f dB : sortie %+.2f dB par rapport à l'entrée (sans auto-gain : %+.2f dB)", thr, dOut - dIn, dRaw - dIn);
+                check (std::abs (dOut - dIn) < 0.5 && dRaw - dIn < -1.5, m);
+            }
+        }
+        {   // phase minimale : latence annoncée nulle, retard réel et écart Dry/Wet
+            for (int os = 1; os <= 3; ++os)
+            {
+                CompParams p; p.os = os; p.osMin = true;
+                std::mt19937 rng (9); std::normal_distribution<double> G (0, 0.2);
+                std::vector<float> nz (48000); for (auto& v : nz) v = (float) G (rng);
+                auto o = run (fs, nz, nz, p);
+                double num = 0, den = 0;
+                for (size_t i = 4096; i < nz.size(); ++i) { const double d = (double) o.L[i] - o.dL[i]; num += d * d; den += (double) o.dL[i] * o.dL[i]; }
+                audiolab::os::Oversampler ov; ov.prepare (os, 1, 256, true);
+                std::snprintf (m, sizeof m, "phase minimale %d× : latence annoncée %d, retard réel %.1f éch. (%.2f ms), nul traité − sec %.1f dB", 1 << os, o.lat, ov.minPhaseDelay(), ov.minPhaseDelay() / fs * 1000, 10 * std::log10 (num / den + 1e-30));
+                check (o.lat == 0 && num / den < 1e-10 && ov.minPhaseDelay() < 8, m);
+            }
+        }
+        {   // grave : distorsion d'un sinus 50 Hz compressé de 12 dB, release rapide (mesure d'information et garde-fou)
+            auto x = sine (fs, 50, -6, 2.0);
+            auto thd = [&] (CompParams p) {
+                auto o = run (fs, x, x, p);
+                // fondamental par corrélation, le reste = distorsion
+                const size_t a0 = 48000, n = 48000; double c = 0, s = 0, e = 0;
+                for (size_t i = 0; i < n; ++i) { const double w = 2 * PI * 50 * (double) i / fs; c += o.L[a0 + i] * std::cos (w); s += o.L[a0 + i] * std::sin (w); e += (double) o.L[a0 + i] * o.L[a0 + i]; }
+                const double f2 = 2 * (c * c + s * s) / n;
+                return 100 * std::sqrt (std::max (0.0, e - f2) / f2); };
+            CompParams p; p.thr = -24; p.ratio = 3; p.atk = 0.005; p.rel = 0.03;
+            const double tFix = thd (p);
+            CompParams q = p; q.hold = 0.02; const double tHold = thd (q);
+            CompParams r = p; r.rms = true; r.rmsWin = 0.05; const double tRms = thd (r);
+            std::snprintf (m, sizeof m, "sinus 50 Hz, release 30 ms : distorsion %.2f %% (Peak), %.2f %% avec Hold 20 ms, %.3f %% en RMS 50 ms", tFix, tHold, tRms);
+            check (tHold < tFix && tRms < 0.5, m);
         }
     }
 

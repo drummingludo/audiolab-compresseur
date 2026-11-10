@@ -23,15 +23,17 @@
 namespace audiolab::lim
 {
 // Estimation de la crête vraie : interpolation ×8, retard de 24 échantillons
-class TruePeak
+// TAPS coefficients par phase (retard TAPS / 2) : 48 pour la détection courante, 96 pour la version fine (3.0.0)
+template <int TAPS, int BETA10>
+class TruePeakT
 {
 public:
-    static constexpr int taps = 48, phases = 8, delay = 24;
+    static constexpr int taps = TAPS, phases = 8, delay = TAPS / 2;
 
-    TruePeak()
+    TruePeakT()
     {
         auto I0 = [] (double x) { double s = 1, t = 1; for (int k = 1; k < 40; ++k) { t *= (x / 2) / k; s += t * t; } return s; };
-        const double beta = 8, i0b = I0 (beta), PI = 3.14159265358979323846;
+        const double beta = BETA10 / 10.0, i0b = I0 (beta), PI = 3.14159265358979323846;
         const int N = taps * phases, c = N / 2;
         for (int p = 0; p < phases; ++p)
         {
@@ -83,11 +85,54 @@ public:
         return m;
     }
 
+    // Variante économe : la crête vraie n'est calculée finement que si elle peut atteindre « level ».
+    // 1. si les 9 échantillons autour de l'instant sont tous sous level / 2 : crête de l'échantillon (pas de calcul) ;
+    // 2. sinon 3 points interpolés (×4) ; 3. s'ils approchent level à moins de 1 dB : les 7 points (×8) et la parabole.
+    inline double pushGated (int ch, double x, double& sp, double level)
+    {
+        auto& hh = hist[(size_t) ch]; int& p = pos[(size_t) ch];
+        p = p == 0 ? taps - 1 : p - 1;
+        hh[(size_t) p] = x; hh[(size_t) (p + taps)] = x;
+        const double* v = hh.data() + p;
+        sp = std::abs (v[delay]);
+        double nb = sp;
+        for (int k = 1; k <= 4; ++k) nb = std::max (nb, std::max (std::abs (v[delay - k]), std::abs (v[delay + k])));
+        if (nb < 0.5 * level) return sp;
+        double y[phases + 1];
+        y[0] = sp; y[phases] = std::abs (v[delay - 1]);
+        double coarse = std::max (y[0], y[phases]);
+        for (int ph = 2; ph < phases; ph += 2)
+        {
+            double s = 0;
+            for (int j = 0; j < taps; ++j) s += h[ph][j] * v[j];
+            y[ph] = std::abs (s); coarse = std::max (coarse, y[ph]);
+        }
+        if (coarse < 0.89 * level) return coarse;
+        int jm = 0;
+        for (int ph = 1; ph < phases; ph += 2)
+        {
+            double s = 0;
+            for (int j = 0; j < taps; ++j) s += h[ph][j] * v[j];
+            y[ph] = std::abs (s);
+        }
+        for (int ph = 1; ph <= phases; ++ph) if (y[ph] > y[jm]) jm = ph;
+        double m = y[jm];
+        if (jm > 0 && jm < phases)
+        {
+            const double a = y[jm - 1], b = y[jm], c = y[jm + 1], d = a - 2 * b + c;
+            if (d < 0) m = std::max (m, b - (a - c) * (a - c) / (8 * d));
+        }
+        return m;
+    }
+
 private:
     double h[phases][taps] {};
     std::vector<std::vector<double>> hist;
     std::vector<int> pos;
 };
+
+using TruePeak = TruePeakT<48, 80>;      // détection (identique à la 2.0.0)
+using TruePeakHQ = TruePeakT<96, 100>;   // contrôle fin de la sortie (second étage du limiteur ∞)
 
 class Limiter
 {

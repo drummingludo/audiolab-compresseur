@@ -236,7 +236,7 @@ public:
         maxLook = std::max (1, jsRound (lookMaxSec * fs));
 
         // anneaux du chemin compresseur, dimensionnés pour ×8
-        int sz = 1; while (sz < maxLook * 8 + 8) sz <<= 1;
+        int sz = 1; while (sz < (maxLook + tp2Delay) * 8 + 8) sz <<= 1;
         hMask = sz - 1;
         for (int c = 0; c < 2; ++c) { xb[c].assign ((size_t) sz, 0.0f); db[c].assign ((size_t) sz, 0.0f); }
         for (auto& b : bank) for (int c = 0; c < 2; ++c) b.gh[c].assign ((size_t) sz, 1.0);
@@ -252,7 +252,7 @@ public:
         for (int c = 0; c < 2; ++c) { wet1[c].assign ((size_t) chunk, 0.0f); comp[c].assign ((size_t) chunk, 0.0f); dryF[c].assign ((size_t) chunk, 0.0f); }
 
         // anneaux du chemin de base (sec, limiteur)
-        int bs = 1; while (bs < maxLook + osLatMax + 8) bs <<= 1;
+        int bs = 1; while (bs < maxLook + tp2Delay + osLatMax + 8) bs <<= 1;
         bMask = bs - 1;
         for (int c = 0; c < 2; ++c) { mainR[c].assign ((size_t) bs, 0.0f); scR[c].assign ((size_t) bs, 0.0f); mainF[c].assign ((size_t) bs, 0.0f); }
         for (auto& u : unit) u.allocate (maxLook);
@@ -354,7 +354,9 @@ public:
     bool limiterActive() const   { return cur.lim; }
     bool truePeakActive() const  { return cur.lim && cur.useTp; }
     bool inTransition() const    { return phase != Phase::idle; }
-    int tpMinLook() const        { return jsRound (0.001 * fs); }   // anticipation minimale pour la crête vraie (1 ms)
+    // anticipation minimale pour la crête vraie : 24 échantillons de détecteur + 8 de rampe (0,67 ms à 48 kHz ; 1 ms en 2.0.0)
+    int tpMinLook() const        { return lim::TruePeak::delay + 8; }
+    static constexpr int tp2Win = 16, tp2Delay = lim::TruePeakHQ::delay + tp2Win;   // second étage : 64 échantillons
 
     // Réduction de gain courante (dB, positive) et crête depuis la dernière lecture — pour l'affichage.
     float getGR() const          { return grNow.load(); }
@@ -378,9 +380,9 @@ private:
     // ─────────────────────────────────────────────────────────────────────
     struct Config
     {
-        int L = 0, A = 0, B = 0, W = 0;
+        int L = 0, A = 0, B = 0, W = 0, D = 0;   // D : retard du second étage crête vraie (0 ou tp2Delay = 64)
         bool lim = false, useTp = false, ms = false;
-        bool operator== (const Config& o) const { return L == o.L && A == o.A && B == o.B && lim == o.lim && useTp == o.useTp && ms == o.ms; }
+        bool operator== (const Config& o) const { return L == o.L && A == o.A && B == o.B && D == o.D && lim == o.lim && useTp == o.useTp && ms == o.ms; }
         bool operator!= (const Config& o) const { return ! (*this == o); }
     };
 
@@ -388,13 +390,15 @@ private:
     {
         Config c;
         c.L = std::min (maxLook, std::max (0, jsRound (q.look * fs)));
-        c.A = constLat ? maxLook : c.L;
-        c.B = c.A - c.L;
         c.lim = q.ratio >= 20;
         // crête vraie : le détecteur (×8) consomme 24 échantillons de l'anticipation ; il faut au moins 1 ms
         // d'anticipation (rampe de gain assez douce pour ne pas créer de crêtes entre les échantillons)
-        c.useTp = c.lim && q.truePeak && c.L >= std::max (lim::TruePeak::delay + 1, tpMinLook());
+        c.useTp = c.lim && q.truePeak && c.L >= tpMinLook();
         c.W = c.useTp ? c.L - lim::TruePeak::delay : c.L;
+        // 3.0.0 : second étage crête vraie (mesure la SORTIE du premier, la retouche avec 64 échantillons d'avance)
+        c.D = c.useTp ? tp2Delay : 0;
+        c.A = constLat ? maxLook + tp2Delay : c.L + c.D;
+        c.B = c.A - c.L;
         c.ms = q.midSide;
         return c;
     }
@@ -413,8 +417,16 @@ private:
     // ── Unité limiteur (rythme de base) ──────────────────────────────────
     struct LimUnit
     {
-        lim::TruePeak tp;
+        lim::TruePeak tp; lim::TruePeakHQ tp2;
         bool useTp = false;
+        // second étage (crête vraie de la sortie) et historique de la sortie finale
+        std::vector<double> y1[2], oh[2];
+        double rq2[64] {}, b1[64] {}, r1[64] {}, dq2v[64] {}; long dq2i[64] {}; long dq2H = 0, dq2T = 0;   // fenêtres ≤ 17 : anneaux de 64
+        double t1 = 0, t2 = 0;
+        int omask = 0;
+        // plafond du second étage = plus haut seuil des W + 26 derniers instants (un seuil qui baisse ne doit pas
+        // faire retoucher brutalement un son déjà limité à l'ancien plafond)
+        std::vector<double> tqV; std::vector<long> tqI; long tqH = 0, tqT = 0;
         int W = 0, L1 = 1, L2 = 1, mask = 0;
         std::vector<double> req[2], rel1[2], box1[2], gh[2], dqVal[2];
         std::vector<long> dqIdx[2];
@@ -433,7 +445,11 @@ private:
                 req[c].assign ((size_t) sz, 1.0); rel1[c].assign ((size_t) sz, 1.0); box1[c].assign ((size_t) sz, 1.0);
                 gh[c].assign ((size_t) sz, 1.0); dqVal[c].assign ((size_t) sz, 1.0); dqIdx[c].assign ((size_t) sz, 0);
             }
-            tp.prepare (2);
+            tp.prepare (2); tp2.prepare (2);
+            int os2 = 1; while (os2 < maxW + tp2Delay + 8) os2 <<= 1;
+            omask = os2 - 1;
+            for (int c = 0; c < 2; ++c) { y1[c].assign (128, 0.0); oh[c].assign ((size_t) os2, 0.0); }
+            tqV.assign ((size_t) os2, 0.0); tqI.assign ((size_t) os2, 0);
         }
         // from : unité dont on reprend l'état de release (continuité), ou nullptr
         void reset (int w, bool tpOn, const LimUnit* from)
@@ -447,15 +463,20 @@ private:
                 dqH[c] = dqT[c] = 0; s1[c] = L1; s2[c] = L2;
                 st[c] = from != nullptr ? from->st[c] : GainStage();
             }
-            tp.reset(); n = 0; minGain = 1;
+            tp.reset(); tp2.reset(); n = 0; minGain = 1;
+            for (int c = 0; c < 2; ++c) { std::fill (y1[c].begin(), y1[c].end(), 0.0); std::fill (oh[c].begin(), oh[c].end(), 0.0); }
+            for (int i = 0; i < 64; ++i) { rq2[i] = b1[i] = r1[i] = dq2v[i] = 1.0; dq2i[i] = 0; }
+            dq2H = dq2T = 0; t1 = k1; t2 = k2; tqH = tqT = 0;
         }
-        int warmLength (int B) const { return W + (useTp ? lim::TruePeak::delay : 0) + L1 + L2 + lim::TruePeak::taps + B + 16; }
+        int warmLength (int B) const { return W + (useTp ? lim::TruePeak::delay + tp2Delay + lim::TruePeakHQ::taps : 0) + L1 + L2 + lim::TruePeak::taps + B + 16; }
+        static constexpr int k1 = tp2Win / 2, k2 = tp2Win - k1 + 1;   // deux moyennes : k1 + k2 − 2 ≤ tp2Win
 
         // det : signal de détection (L, R) ; thrLin : seuil linéaire ; mk : make-up linéaire
-        inline void step (const double* det, double thrLin, double lk, double mk, double aR, double aS, int hold, double wA)
+        // xa : son auquel s'applique le gain de cet instant (entrée retardée de l'anticipation)
+        inline void step (const double* det, const double* xa, double thrLin, double lk, double mk, double aR, double aS, int hold, double wA)
         {
-            double own[2];
-            const double cl = useTp ? thrLin * 0.99426694 : thrLin;   // −0,05 dB en crête vraie (marge d'interpolation)
+            double own[2], g1[2];
+            const double cl = useTp ? thrLin * 0.98855309 : thrLin;   // −0,10 dB en crête vraie (marge d'interpolation ; −0,05 en 2.0.0)
             for (int c = 0; c < 2; ++c)
             {
                 double pk;
@@ -487,11 +508,47 @@ private:
                 const double gain = std::min (1.0, s2[c] / L2);
                 if (gain < minGain) minGain = gain;
                 gh[c][(size_t) (n & mask)] = gain * mk;
+                g1[c] = gain;
+            }
+            if (! useTp)
+                for (int c = 0; c < 2; ++c) oh[c][(size_t) (n & omask)] = xa[c] * g1[c] * mk;
+            else
+            {
+                // second étage : crête vraie de la sortie du premier (instant n − 24), gain de retouche commun aux deux voies,
+                // minimum glissant sur 16 échantillons puis deux moyennes ; appliqué à la sortie retardée de 64 échantillons.
+                // Le premier étage a déjà fait l'essentiel : la retouche ne dépasse pas quelques centièmes de dB.
+                while (tqH != tqT && tqV[(size_t) ((tqT - 1) & omask)] <= thrLin) --tqT;
+                tqI[(size_t) (tqT & omask)] = n; tqV[(size_t) (tqT & omask)] = thrLin; ++tqT;
+                while (tqH != tqT && tqI[(size_t) (tqH & omask)] < n - (W + 26)) ++tqH;
+                const double cl2 = tqV[(size_t) (tqH & omask)] * 0.99083194;   // −0,08 dB : marge entre deux interpolateurs sur un bruit plein spectre
+                double q = 1;
+                for (int c = 0; c < 2; ++c)
+                {
+                    const double y = xa[c] * g1[c];
+                    y1[c][(size_t) (n & 127)] = y;
+                    double sp; const double pk = tp2.pushGated (c, y, sp, cl2);
+                    if (pk > cl2) q = std::min (q, cl2 / pk);
+                }
+                while (dq2H != dq2T && dq2v[(dq2T - 1) & 63] >= q) --dq2T;
+                dq2i[dq2T & 63] = n; dq2v[dq2T & 63] = q; ++dq2T;
+                while (dq2H != dq2T && dq2i[dq2H & 63] < n - tp2Win) ++dq2H;
+                const double mn2 = dq2v[dq2H & 63];
+                t1 += mn2 - r1[(n - k1) & 63]; r1[n & 63] = mn2;
+                const double bb = t1 / k1;
+                t2 += bb - b1[(n - k2) & 63]; b1[n & 63] = bb;
+                const double gain2 = std::min (1.0, t2 / k2);
+                for (int c = 0; c < 2; ++c) oh[c][(size_t) (n & omask)] = y1[c][(size_t) ((n - tp2Delay) & 127)] * gain2 * mk;
+                if ((n & 0x3FF) == 0)
+                {   // resynchronise les sommes
+                    t1 = 0; for (int i = 0; i < k1; ++i) t1 += r1[(n - i) & 63];
+                    t2 = 0; for (int i = 0; i < k2; ++i) t2 += b1[(n - i) & 63];
+                }
             }
             ++n;
             if ((n & 0xFFFF) == 0) resync();   // resynchronise les sommes (dérive des additions)
         }
         inline double gainAt (int c, int back) const { return gh[c][(size_t) ((n - 1 - back) & mask)]; }
+        inline double outAt (int c, int back) const { return oh[c][(size_t) ((n - 1 - back) & omask)]; }
         void resync()
         {
             for (int c = 0; c < 2; ++c)
@@ -823,8 +880,16 @@ private:
             if (scTypeCur != Biquad::Off) for (int c = 0; c < 2; ++c) det[c] = scB[c].run (det[c]);
 
             const double aRl = p.autoRel ? aRfastB : aRB;
-            if (uC != nullptr) uC->step (det, thrLinB, lk, mk, aRl, aSB, holdB, wA);
-            if (uN != nullptr && uN != uC) uN->step (det, thrLinB, lk, mk, aRl, aSB, holdB, wA);
+            if (uC != nullptr)
+            {
+                const size_t r = (size_t) ((w - osLat - C.L) & bMask); const double xa[2] = { mainR[0][r], mainR[1][r] };
+                uC->step (det, xa, thrLinB, lk, mk, aRl, aSB, holdB, wA);
+            }
+            if (uN != nullptr && uN != uC)
+            {
+                const size_t r = (size_t) ((w - osLat - nxt.L) & bMask); const double xa[2] = { mainR[0][r], mainR[1][r] };
+                uN->step (det, xa, thrLinB, lk, mk, aRl, aSB, holdB, wA);
+            }
 
             const double t = xf ? smooth ((double) (xfPos + i + 1) / xfLen) : 0.0;
             // sec (en phase minimale, hors limiteur : le sec filtré comme le traité)
@@ -848,8 +913,7 @@ private:
                 auto wetOf = [&] (const Config& K, const LimUnit* u, double& a, double& b)
                 {
                     if (! K.lim) { a = comp[0][(size_t) i]; b = comp[1][(size_t) i]; if (delta) { a += sl; b += sr; } return; }
-                    const size_t r = (size_t) ((w - osLat - K.A) & bMask);
-                    a = mainR[0][r] * u->gainAt (0, K.B); b = mainR[1][r] * u->gainAt (1, K.B);
+                    a = u->outAt (0, K.B - K.D); b = u->outAt (1, K.B - K.D);
                 };
                 wetOf (C, uC, yl, yr);
                 if (xf && (C.lim || N.lim))
