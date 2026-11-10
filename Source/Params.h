@@ -28,7 +28,11 @@ inline constexpr const char* stMode    = "stereoMode";   // Stereo / Mid-Side
 inline constexpr const char* hold      = "hold";         // 0 … 500 ms
 inline constexpr const char* autoRel   = "autoRelease";  // Off / On
 inline constexpr const char* rmsWin    = "rmsWindow";    // 1 … 300 ms
-inline constexpr const char* oversamp  = "oversampling"; // Off / 2× / 4×
+inline constexpr const char* oversamp  = "oversampling"; // Off / 2× / 4× / 8× (8× ajouté en 3.0.0, en fin de liste)
+// 3.0.0
+inline constexpr const char* range     = "range";        // réduction de gain maximale, 1 … 60 dB (60 = Off)
+inline constexpr const char* autoGain  = "autoGain";     // Off / On : compensation à volume égal
+inline constexpr const char* osFilter  = "osFilter";     // filtres du suréchantillonnage : Linear / Minimum (phase)
 
 // Même « accrochage » que snap() dans Audio Lab : pas du curseur d'origine.
 inline float snapTo (float v, float mn, float mx, float step)
@@ -109,7 +113,13 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { autoRel, 2 }, "Auto Release", StringArray { "Off", "On" }, 0));
     fl (rmsWin, "RMS Window", logRange (1, 300, 0.1f), 3, "ms", [] (float v, int) { return fmtMs (v); }, 2);
     // suréchantillonnage : change la latence, donc non automatisable (réglé une fois, hors lecture de préférence)
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { oversamp, 2 }, "Oversampling", StringArray { "Off", "2" + times, "4" + times }, 0,
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { oversamp, 2 }, "Oversampling", StringArray { "Off", "2" + times, "4" + times, "8" + times }, 0,
+                                                   AudioParameterChoiceAttributes().withAutomatable (false)));
+
+    // 3.0.0 : valeurs par défaut neutres (même son que la 2.0.0)
+    fl (range, "Range", linRange (1, 60, 0.5f), 60, "dB", [] (float v, int) { return v >= 60 ? String ("Off") : String (v, 1) + " dB"; }, 3);
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { autoGain, 3 }, "Auto Gain", StringArray { "Off", "On" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { osFilter, 3 }, "OS Filter", StringArray { "Linear", "Minimum" }, 0,
                                                    AudioParameterChoiceAttributes().withAutomatable (false)));
     return l;
 }

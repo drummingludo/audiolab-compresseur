@@ -172,3 +172,78 @@ Mesuré à 44,1 / 48 / 96 / 192 kHz : courbe statique (écart < 0,0001 dB, aussi
 - True peak : il faut au moins 1 ms de Lookahead ; avec du contenu au-delà de 20 kHz, dépassement possible de 0,07 dB au plus.
 - Le suréchantillonnage ne s'applique pas au limiteur ∞ (inutile pour son plafond, qui est exact au rythme de base) ; changer le suréchantillonnage coupe le son 13 à 45 ms (fondus) car la latence change.
 - Avec une compression extrême (attaque 0,1 ms, release 10 ms), baisser le seuil de 30 dB d'un coup produit un peu d'aigu pendant 20 ms (−55 dB) : c'est l'attaque qui suit la réduction qui monte, comme si la musique montait d'autant ; avec une attaque d'1 ms, rien (−73 dB).
+
+---
+
+## Version 3.0.0 (branche `v3`, en cours, non publiée)
+
+Cette section remplace, pour la 3.0.0, les dimensions et les mesures données plus haut pour la 2.0.0.
+
+### Mise en page « C · Symétrie » (validée sur maquette le 10 novembre 2026)
+
+Système de mesures : module de 8 px. Marges et écarts de 24 (3 modules), 16 entre éléments liés. Tous les axes tombent sur des pixels entiers. Trois tailles de texte (10, 12, 16), trois rayons de coin (4, 8, 12, pastilles concentriques : rayon intérieur = rayon extérieur moins le retrait), trois épaisseurs de trait (1, 2, 4).
+
+| Élément | Position à 100 % (px) | Remarque |
+|---|---|---|
+| Fenêtre repliée | 592 × 368 | 74 × 46 modules, rapport 1,61 |
+| Fenêtre dépliée | 592 × 696 | panneau de 312 de haut |
+| Axe de symétrie | x = 296 | écran, sélecteur de vue et panneau centrés dessus |
+| Threshold, Ratio (teal) | axes x 80, y 80 et 224 | colonne de gauche : le niveau |
+| Attack, Release (orange) | axes x 512, y 80 et 224 | colonne de droite : le temps |
+| Grand potentiomètre | arc 112 hors tout (rayon d'axe 54, trait 4), capuchon 80 | rapport capuchon / arc = 5/7 ; l'arc part de la marge de 24 |
+| Valeur, unité, nom | 16 px 600, 10 px, 10 px 600 majuscules | nom dans une boîte de 16 centrée 64 px sous l'axe |
+| Écran carré | x 160, y 24, 272 × 272, coins 12 | 34 modules = hauteur des deux rangées de potentiomètres |
+| Échelle des écrans | 4 px par dB (272 px = 68 dB) | lignes tous les 12 dB, donc sur la grille |
+| Rangée du bas | y 312, hauteur 32 | 16 px sous l'écran, 24 px au-dessus du bord |
+| Sélecteur de vue | x 220, 152 × 32 | 3 segments de 48, retrait 4, rayons 8 et 4 |
+| Petit Makeup | calé à droite sur x 568, 32 hors tout | rayon d'axe 14,5, trait 3, capuchon 20 |
+| Panneau avancé | x 24, y 360, 544 × 312, coins 12 | 2 colonnes de 248 (x 40 et 304), 9 lignes de 24 au pas de 32 |
+| Ligne du panneau | étiquette 96, commande 104, valeur 48 | sélecteurs de 152, tous alignés à x + 96 |
+| Vue VU meters | cadran 240 × 160 (3:2) à 16 px des bords | barres In / GR / Out aux centres y 200, 224, 248 |
+
+Corrections optiques : les noms en majuscules sont recentrés de 0,4 px (l'interlettrage ajoute un blanc après la dernière lettre) ; la valeur est remontée de 1 px dans le capuchon.
+
+Panneau, colonne gauche : Knee, Range, Lookahead, Hold, Release, Auto gain, Mix, True peak, Oversampling. Colonne droite : Detection, RMS time, SC source, Side-chain et Listen, SC freq, SC Q, Stereo link, Mode, OS filter.
+
+Vue Activity : niveaux posés en bas (entrée en gris, sortie en teal), seuil en pointillés, réduction de gain en orange suspendue en haut à la même échelle, chiffres d'échelle à droite.
+
+Captures : `docs/captures_3.0.0/` (60, 100 et 200 %, replié et déplié).
+
+### Nouveaux réglages (identifiants ajoutés, aucun identifiant existant modifié)
+
+| Réglage | Identifiant | Plage | Défaut | Rôle |
+|---|---|---|---|---|
+| Range | `range` | 1 à 60 dB (60 = Off) | Off | réduction de gain maximale ; sans effet en ∞:1 |
+| Auto gain | `autoGain` | Off / On | Off | ramène la sortie au volume de l'entrée (pondération K, 1,5 s) ; sans effet en ∞:1 |
+| OS filter | `osFilter` | Linear / Minimum | Linear | filtres du suréchantillonnage ; Minimum = latence nulle annoncée |
+| Oversampling | `oversampling` | Off / 2× / 4× / 8× | Off | 8× ajouté en fin de liste : les sessions 2.0.0 gardent leur réglage |
+| Mix | `mix` | 0 à 100 % | 100 % | réglage existant, désormais affiché dans le panneau |
+
+### Moteur
+
+- Deux moteurs en parallèle (`CompressorEngine`) : un changement de suréchantillonnage se fait par fondu enchaîné de 20 ms, sans coupure.
+- Suréchantillonnage : filtres à 120 dB (100 en 2.0.0), phase linéaire (demi-bandes FIR) ou minimale (demi-bandes IIR polyphases). En phase linéaire seule la différence traité − sec est suréchantillonnée : sans compression, la sortie est l'entrée au bit près.
+- Détection crête suréchantillonnée : réduction moyenne exacte entre deux échantillons (primitive de la courbe) et intégration par trapèzes avec bascule attaque / release datée entre les échantillons.
+- Limiteur ∞ : second étage qui mesure la crête vraie de la sortie du premier (interpolateur de 96 points) et la retouche avec 64 échantillons d'avance. Crête vraie active dès 32 échantillons de lookahead.
+- Latences : suréchantillonnage linéaire 85 / 93 / 96 échantillons (2× / 4× / 8×) ; phase minimale 0 annoncé (retard réel 4,5 à 6,5 échantillons) ; limiteur crête vraie + 64 ; AAX : latence fixe de 10 ms + 64 échantillons.
+
+### Mesures (banc `tests/quality_test.cpp`, 144 vérifications)
+
+| Mesure | 2.0.0 | 3.0.0 |
+|---|---|---|
+| Repliement jusqu'à 20 kHz, 8× (pire cas du banc) | sans objet (4× : −79 dB) | −104 dB |
+| Repliement tout le spectre, 8× | sans objet | −93 dB |
+| Repliement jusqu'à 20 kHz, 4× | −79 dB | −88 dB |
+| Limiteur ∞, bruit blanc plein spectre | +0,07 dB au-dessus du plafond | 0,012 dB dessous au pire |
+| Automation de chaque réglage (26 cas) | −55 à −108 dB | sous −90 dB partout |
+| Changement de suréchantillonnage | coupure de 13 à 45 ms | fondu ; creux de 2,5 dB sur du bruit, 6,7 dB sur un sinus 220 Hz |
+| Nul sans compression, suréchantillonné | −103 à −115 dB | au bit près |
+| CPU 48 kHz stéréo : Off / 2× / 4× / 8× | 0,21 / 0,96 / 1,80 % / sans objet | 0,21 / 1,12 / 2,06 / 3,60 % |
+| CPU limiteur ∞ crête vraie | 1,66 % | 2,25 % |
+
+### Non fait, non vérifié
+
+- Aucune écoute. Aucune mesure de Pro-C, UAD ou Waves.
+- Sinus 50 Hz, release 30 ms en Peak : 2,5 % de distorsion, comme en 2.0.0 (0,06 % en RMS 50 ms, nulle avec Hold 20 ms).
+- Release automatique affiné et caractères de compression : non commencés.
+- Mac (VST3, AU, AAX), Windows, Logic, Pro Tools : non testés pour la 3.0.0 ; pluginval niveau 10 passé en VST3 sous Linux uniquement.

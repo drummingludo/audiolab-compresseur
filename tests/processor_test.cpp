@@ -1,6 +1,7 @@
 // Vérifie le plugin complet (pas seulement le moteur) : latence annoncée, Dry/Wet aligné
 // avec le lookahead, Bypass, mono, sauvegarde / rappel de l'état et des snapshots ;
 // 2.0.0 : bus side-chain, suréchantillonnage, preset Brickwall, réouverture d'une session 1.x.
+#include <functional>
 #include "PluginProcessor.h"
 #include <cstdio>
 
@@ -89,11 +90,11 @@ int main()
     {
         AudioLabCompProcessor p;
         p.constantLatency = true;                // ce que fait le wrapper AAX
-        const int fixed = (int) std::floor (0.010 * sr + 0.5);
+        const int fixed = (int) std::floor (0.010 * sr + 0.5) + 64;   // 3.0.0 : + 64 éch. (second étage crête vraie du limiteur)
         setP (p, audiolab::params::look, 5);
         p.setPlayConfigDetails (2, 2, sr, 256); p.prepareToPlay (sr, 256);
         char msg[128];
-        std::snprintf (msg, sizeof msg, "latence annoncée fixe = 10 ms (%d éch. à %.1f kHz)", fixed, sr / 1000);
+        std::snprintf (msg, sizeof msg, "latence annoncée fixe = 10 ms + 64 éch. (%d éch. à %.1f kHz)", fixed, sr / 1000);
         check (p.getLatencySamples() == fixed, msg);
 
         setP (p, audiolab::params::mix, 50);
@@ -226,7 +227,7 @@ int main()
         AudioLabCompProcessor p;
         setP (p, audiolab::params::look, 5); setP (p, audiolab::params::oversamp, 2);
         p.setPlayConfigDetails (2, 2, fs, 256); p.prepareToPlay (fs, 256);
-        check (p.getLatencySamples() == 240 + 76, "suréchantillonnage 4× : latence annoncée = lookahead + 76 éch.");
+        check (p.getLatencySamples() == 240 + 93, "suréchantillonnage 4× : latence annoncée = lookahead + 93 éch.");
         setP (p, audiolab::params::mix, 50);
         p.prepareToPlay (fs, 256);
         auto y = impulse (p, 2, 4096);
@@ -234,7 +235,7 @@ int main()
         // l'impulsion traitée passe par le filtre du suréchantillonnage (crête un peu plus basse) : on vérifie
         // qu'elle tombe au même échantillon que le sec, à la latence annoncée (une seule crête, pas de peigne)
         int above = 0; for (auto v : y) if (std::abs (v) > 0.2f) ++above;
-        check (pk == 100 + 316 && above == 1 && y[pk] > 0.6f, "4× + Dry/Wet 50 % : sec et traité arrivent ensemble, à la latence annoncée");
+        check (pk == 100 + 240 + 93 && above == 1 && y[pk] > 0.6f, "4× + Dry/Wet 50 % : sec et traité arrivent ensemble, à la latence annoncée");
         check (! p.apvts.getParameter (audiolab::params::oversamp)->isAutomatable(), "Oversampling non automatisable (il change la latence)");
     }
     {
@@ -294,6 +295,78 @@ int main()
         e.applyPreset (-1);
         check (e.getParam (audiolab::params::hold) < 0.5f && e.getParam (audiolab::params::stMode) < 0.5f && juce::roundToInt (e.getParam (audiolab::params::oversamp)) == 1,
                "Reset : réglages du détecteur par défaut, suréchantillonnage conservé");
+    }
+
+    std::printf ("\n3.0.0 : nouveaux réglages, sessions 2.0.0, suréchantillonnage sans coupure\n");
+    {
+        namespace P = audiolab::params;
+        // session 2.0.0 : pas de Range, Auto gain, OS filter ; suréchantillonnage 4× (indice 2) enregistré
+        AudioLabCompProcessor a; setP (a, P::thr, -18); setP (a, P::oversamp, 2);
+        auto st = a.apvts.copyState();
+        for (auto* id : { P::range, P::autoGain, P::osFilter }) st.removeChild (st.getChildWithProperty ("id", juce::String (id)), nullptr);
+        juce::MemoryBlock mb; a.copyXmlToBinary (*st.createXml(), mb);
+        AudioLabCompProcessor b; setP (b, P::range, 6); setP (b, P::autoGain, 1); setP (b, P::osFilter, 1);
+        b.setStateInformation (mb.getData(), (int) mb.getSize());
+        check (juce::approximatelyEqual (b.getParam (P::range), 60.0f) && b.getParam (P::autoGain) < 0.5f && b.getParam (P::osFilter) < 0.5f
+               && juce::roundToInt (b.getParam (P::oversamp)) == 2 && juce::approximatelyEqual (b.getParam (P::thr), -18.0f),
+               "session 2.0.0 rouverte : Range Off, Auto gain Off, filtre Linear ; son suréchantillonnage 4× reste 4×");
+        AudioLabCompProcessor c; setP (c, P::range, 12); setP (c, P::autoGain, 1); setP (c, P::osFilter, 1); setP (c, P::oversamp, 3);
+        juce::MemoryBlock mb2; c.getStateInformation (mb2);
+        AudioLabCompProcessor d; d.setStateInformation (mb2.getData(), (int) mb2.getSize());
+        check (juce::approximatelyEqual (d.getParam (P::range), 12.0f) && d.getParam (P::autoGain) > 0.5f && d.getParam (P::osFilter) > 0.5f
+               && juce::roundToInt (d.getParam (P::oversamp)) == 3, "session 3.0.0 : Range, Auto gain, OS filter et 8× rappelés");
+
+        auto runBlocks = [] (AudioLabCompProcessor& p, int blocks, double f0, long& pos, std::vector<float>* keep, std::function<void (int)> each = {})
+        {
+            juce::MidiBuffer midi;
+            for (int k = 0; k < blocks; ++k)
+            {
+                if (each) each (k);
+                juce::AudioBuffer<float> buf (2, 256);
+                static juce::Random rnd (7);
+                for (int i = 0; i < 256; ++i, ++pos)
+                {   // f0 > 0 : sinus ; sinon bruit blanc (programme large bande)
+                    const float v = f0 > 0 ? 0.5f * (float) std::sin (2 * juce::MathConstants<double>::pi * f0 * (double) pos / 48000.0) : 0.4f * (rnd.nextFloat() * 2 - 1);
+                    buf.setSample (0, i, v); buf.setSample (1, i, v);
+                }
+                p.processBlock (buf, midi);
+                if (keep != nullptr) for (int i = 0; i < 256; ++i) keep->push_back (buf.getSample (0, i));
+            }
+        };
+        {   // 8× phase linéaire, rien ne compresse : sortie = entrée retardée de la latence annoncée, au bit près
+            AudioLabCompProcessor p; setP (p, P::oversamp, 3);
+            p.setPlayConfigDetails (2, 2, 48000, 256); p.prepareToPlay (48000, 256);
+            const int lat = p.getLatencySamples();
+            long pos = 0; std::vector<float> y; runBlocks (p, 60, 997, pos, &y);
+            bool same = true;
+            for (size_t i = (size_t) lat + 2048; i < y.size(); ++i)
+                same = same && y[i] == 0.5f * (float) std::sin (2 * juce::MathConstants<double>::pi * 997 * (double) ((long) i - lat) / 48000.0);
+            char msg[160]; std::snprintf (msg, sizeof msg, "8× phase linéaire sans compression : sortie identique à l'entrée au bit près (latence %d éch.)", lat);
+            check (same && lat == 96, msg);
+        }
+        {   // changement Off → 8× → 2× puis filtre Minimum pendant la lecture : jamais de trou, latence finale exacte.
+            // Sur un programme large bande (bruit), le fondu entre deux latences différentes creuse au plus 3 dB pendant 20 ms.
+            // (Sur un son pur, deux copies décalées peuvent s'opposer : creux bref plus marqué, sans clic. Mesuré pour information.)
+            double lvl[2] = { 0, 0 }; int lat = -1;
+            for (int kind = 0; kind < 2; ++kind)
+            {
+                AudioLabCompProcessor p; setP (p, P::thr, 0); setP (p, P::ratio, 4);
+                p.setPlayConfigDetails (2, 2, 48000, 256); p.prepareToPlay (48000, 256);
+                long pos = 0; std::vector<float> y;
+                runBlocks (p, 400, kind == 0 ? -1.0 : 220.0, pos, &y, [&] (int k) { if (k == 100) setP (p, P::oversamp, 3); if (k == 200) setP (p, P::oversamp, 1); if (k == 300) setP (p, P::osFilter, 1); });
+                double minRms = 1e9, ref = 0; int cnt = 0;
+                for (size_t i = 12800; i + 512 <= y.size(); i += 64) { double e = 0; for (size_t j = 0; j < 512; ++j) e += (double) y[i + j] * y[i + j]; e = std::sqrt (e / 512); minRms = std::min (minRms, e); ref += e; ++cnt; }
+                lvl[kind] = 20 * std::log10 (minRms / (ref / cnt) + 1e-12);
+                lat = p.getLatencySamples();
+            }
+            char msg[220]; std::snprintf (msg, sizeof msg, "suréchantillonnage changé 3 fois en lecture : creux maximal %.1f dB sur du bruit (%.1f dB sur un sinus 220 Hz), latence finale %d", lvl[0], lvl[1], lat);
+            check (lvl[0] > -4.5 && lat == 0, msg);
+        }
+        {   // limiteur ∞ crête vraie : latence = lookahead + 64
+            AudioLabCompProcessor p; p.applyPreset (3);
+            p.setPlayConfigDetails (2, 2, 48000, 256); p.prepareToPlay (48000, 256);
+            check (p.getLatencySamples() == 240 + 64, "preset Brickwall limiter (5 ms, True peak) : latence annoncée = 240 + 64 éch.");
+        }
     }
 
     std::printf ("\n%s\n", fails == 0 ? "RÉSULTAT : tout est conforme" : "RÉSULTAT : des écarts à corriger");

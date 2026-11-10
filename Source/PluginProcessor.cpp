@@ -7,7 +7,8 @@ static const char* snapshotParams[] = { params::thr, params::ratio, params::knee
                                         params::makeup, params::look, params::detect, params::scType, params::scFreq,
                                         params::scQ, params::mix,
                                         params::truePeak, params::scSource, params::link, params::stMode, params::hold,
-                                        params::autoRel, params::rmsWin, params::oversamp };
+                                        params::autoRel, params::rmsWin, params::oversamp,
+                                        params::range, params::autoGain, params::osFilter };
 
 AudioLabCompProcessor::AudioLabCompProcessor()
     : AudioProcessor (BusesProperties()
@@ -61,6 +62,9 @@ CompParams AudioLabCompProcessor::currentParams() const
     p.autoRel = getParam (params::autoRel) > 0.5f;
     p.rmsWin = getParam (params::rmsWin) / 1000.0;
     p.os = juce::roundToInt (getParam (params::oversamp));
+    p.osMin = getParam (params::osFilter) > 0.5f;
+    p.range = getParam (params::range);
+    p.autoGain = getParam (params::autoGain) > 0.5f;
     return p;
 }
 
@@ -128,8 +132,10 @@ void AudioLabCompProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             if (p.scListen) { pl = wetL[(size_t) i]; pr = wetR[(size_t) i]; }   // on écoute le détecteur
             else
             {
-                const float gd = std::cos (m * juce::MathConstants<float>::halfPi);
-                const float gw = std::sin (m * juce::MathConstants<float>::halfPi);
+                // aux deux bouts les gains sont exacts (cos (π/2) calculé en float ne vaut pas 0) : à 100 %,
+                // la sortie est le traité au bit près, ce qui permet le test de nul parfait (3.0.0)
+                const float gd = m >= 1.0f ? 0.0f : std::cos (m * juce::MathConstants<float>::halfPi);
+                const float gw = m >= 1.0f ? 1.0f : m <= 0.0f ? 0.0f : std::sin (m * juce::MathConstants<float>::halfPi);
                 pl = dl * gd + wetL[(size_t) i] * gw;
                 pr = dr * gd + wetR[(size_t) i] * gw;
             }
@@ -178,6 +184,7 @@ void AudioLabCompProcessor::applyPreset (int index)
     setParam (params::scFreq, 1000); setParam (params::scQ, 0.7f); setParam (params::scListen, 0);
     setParam (params::truePeak, 1); setParam (params::scSource, 0); setParam (params::link, 100);
     setParam (params::stMode, 0); setParam (params::hold, 0); setParam (params::autoRel, 0); setParam (params::rmsWin, 3);
+    setParam (params::range, 60);   // 3.0.0 ; Auto gain et OS filter, choix de travail, ne changent pas
     if (index >= 0 && index < params::numPresets)
     {
         const auto& pr = params::presets[index];

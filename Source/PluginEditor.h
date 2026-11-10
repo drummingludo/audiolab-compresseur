@@ -14,10 +14,10 @@ public:
     void paint (juce::Graphics&) override {}
     void resized() override;
 
-    // Dimensions validées (docs/06_GUI_Plugin_Compresseur.md, charte V2) : 580 × 362 replié ;
-    // déplié 580 × 640 depuis la 2.0.0 (panneau avancé de 7 lignes au lieu de 3)
-    static constexpr int baseW = 580, baseH = 362, baseHOpen = 640;
-    static constexpr int advRows = 7;
+    // 3.0.0, mise en page « C · Symétrie » validée (docs/06_GUI_Plugin_Compresseur.md) : module de 8 px,
+    // 592 × 368 replié (74 × 46 modules), 592 × 696 déplié (panneau avancé de 9 lignes au pas de 32)
+    static constexpr int baseW = 592, baseH = 368, baseHOpen = 696;
+    static constexpr int advRows = 9;
 
 private:
     // Contenu dessiné à taille fixe puis mis à l'échelle (fenêtre redimensionnable, proportions fixes)
@@ -27,8 +27,6 @@ private:
         explicit Content (AudioLabCompEditor& e) : ed (e) {}
         void paint (juce::Graphics& g) override;
         void resized() override;
-        float labelGap (const juce::String& label) const;
-        static constexpr int advRowsH = 34 * advRows;   // hauteur des lignes du panneau avancé (26 + 8 par ligne)
         AudioLabCompEditor& ed;
     };
 
@@ -51,11 +49,15 @@ private:
     audiolab::SegButtons detectSeg { theme, { "Peak", "RMS" } };
     // 2.0.0
     std::unique_ptr<audiolab::SliderRow> rowRms, rowHold, rowLink;
+    // 3.0.0
+    std::unique_ptr<audiolab::SliderRow> rowRange, rowMix;
+    audiolab::SegButtons agSeg { theme, { "Off", "On" } };
+    audiolab::SegButtons osfSeg { theme, { "Linear", "Minimum" } };
     audiolab::SegButtons relSeg { theme, { "Fixed", "Auto" } };
     audiolab::SegButtons tpSeg { theme, { "Off", "On" } };
     audiolab::SegButtons scSrcSeg { theme, { "Internal", "External" } };
     audiolab::SegButtons modeSeg { theme, { "Stereo", "Mid-Side" } };
-    audiolab::SegButtons osSeg { theme, { "Off", juce::String::fromUTF8 ("2\xc3\x97"), juce::String::fromUTF8 ("4\xc3\x97") } };
+    audiolab::SegButtons osSeg { theme, { "Off", juce::String::fromUTF8 ("2\xc3\x97"), juce::String::fromUTF8 ("4\xc3\x97"), juce::String::fromUTF8 ("8\xc3\x97") } };
     // libellés des lignes à sélecteur du panneau (dessinés par Content::paint)
     struct SegLabel { juce::String text; audiolab::SegButtons* seg; };
     std::vector<SegLabel> segLabels;

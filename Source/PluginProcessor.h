@@ -48,12 +48,13 @@ public:
     // Pro Tools (AAX) exige une latence qui ne change jamais pendant la lecture : la latence annoncée
     // est alors fixée au lookahead maximal (10 ms) et le gain est retardé du complément (le son, lui, est
     // toujours lu à 10 ms). Activé automatiquement en AAX (prepareToPlay) ; VST3 et AU gardent la latence
-    // = lookahead. Le suréchantillonnage ajoute sa latence (69 ou 76 éch.) dans les deux cas.
+    // = lookahead. Le suréchantillonnage en phase linéaire ajoute sa latence (85, 93 ou 96 éch.) dans les deux cas,
+    // et le limiteur ∞ en crête vraie 64 éch. (3.0.0 : la latence fixe de l'AAX vaut donc 10 ms + 64 éch.).
     bool constantLatency = false;
 
     // Side-chain externe : vrai si le logiciel hôte a branché le bus « Sidechain » (pour l'interface)
     bool sideChainConnected() const { return scConnected.load(); }
-    // Limiteur ∞ : la crête vraie est-elle active (il faut au moins 1 ms de lookahead) ?
+    // Limiteur ∞ : la crête vraie est-elle active (il faut au moins 32 échantillons de lookahead) ?
     bool truePeakActive() const { return tpActive.load(); }
 
     // Mesures pour l'affichage (thread audio → interface)
@@ -64,7 +65,7 @@ private:
     void setParam (const char* id, float value);
     audiolab::CompParams currentParams() const;
 
-    audiolab::CompressorCore core;
+    audiolab::CompressorEngine core;   // deux moteurs : changement de suréchantillonnage sans coupure (3.0.0)
     juce::AudioProcessorParameter* bypassParam = nullptr;
 
     // Le moteur rend le signal traité ET le signal sec recalé sur la même latence (pas de filtrage en peigne
